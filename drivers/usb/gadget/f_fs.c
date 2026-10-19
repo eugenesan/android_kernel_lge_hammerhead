@@ -1002,7 +1002,7 @@ first_try:
  			if (unlikely(!req))
  				goto error;
  			req->buf      = data;
- 			req->length   = io_data->len;
+ 			req->length   = io_data->read ? buffer_len : io_data->len;
 
 			io_data->buf = data;
  			io_data->ep = ep->ep;
@@ -1022,8 +1022,25 @@ first_try:
 		} else {
 			DECLARE_COMPLETION_ONSTACK(done);
  			req = ep->req;
+			/*
+			 * For a read, queue the whole (rounded up) buffer, not just
+			 * the number of bytes the caller asked for.
+			 *
+			 * The DWC3 controller cannot complete a short OUT transfer: a
+			 * request shorter than the endpoint's wMaxPacketSize never
+			 * finishes, so the data the host sent never reaches
+			 * userspace.  adbd reads the 24-byte ADB header with a single
+			 * read(), so queueing io_data->len here stalls the transport
+			 * and adb never gets past "offline": the host sees the ADB
+			 * interface enumerate and then nothing else.
+			 *
+			 * buffer_len is round_up(io_data->len, 1024), so it is always a
+			 * multiple of the 512-byte max packet size and the buffer
+			 * allocated above is large enough.  The copy back to userspace
+			 * is still limited to io_data->len by the min_t() below.
+			 */
  			req->buf      = data;
- 			req->length   = io_data->len;
+ 			req->length   = io_data->read ? buffer_len : io_data->len;
  			req->context  = &done;
  			req->complete = ffs_epfile_io_complete;
  			ret = usb_ep_queue(ep->ep, req, GFP_ATOMIC);

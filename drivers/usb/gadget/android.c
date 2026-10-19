@@ -3497,6 +3497,25 @@ static int __devinit android_probe(struct platform_device *pdev)
 
 	android_dev->name = pdev->name;
 	android_dev->disable_depth = 1;
+
+	/*
+	 * Default the functionfs alias to "adb".
+	 *
+	 * The name written to /sys/class/android_usb/android0/f_ffs/aliases
+	 * decides whether the name "adb" in a configuration string selects the
+	 * userspace functionfs instance (what every modern adbd uses) or the
+	 * legacy in-kernel f_adb function (drivers/usb/gadget/f_adb.c).
+	 *
+	 * The attribute only exists once the gadget has bound to a UDC, so
+	 * userspace that writes it early races with the UDC coming up.  If
+	 * that write is lost, the composite binds the in-kernel adb function:
+	 * the host still enumerates an "ADB Interface", but no userspace adbd
+	 * is attached to it, and adb sits at "offline" forever.
+	 *
+	 * Defaulting the alias removes the race -- the write, when it happens,
+	 * just sets the same value again.
+	 */
+	strlcpy(android_dev->ffs_aliases, "adb", sizeof(android_dev->ffs_aliases));
 	android_dev->functions = supported_functions;
 	android_dev->configs_num = 0;
 	INIT_LIST_HEAD(&android_dev->configs);
