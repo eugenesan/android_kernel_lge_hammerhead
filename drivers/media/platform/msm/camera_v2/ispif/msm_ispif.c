@@ -931,15 +931,21 @@ static long msm_ispif_cmd(struct v4l2_subdev *sd, void *arg)
 		msm_ispif_io_dump_reg(ispif);
 		break;
 	case ISPIF_START_FRAME_BOUNDARY:
-		/* DEBUG: what did we put into the VFE's ISPIF block? */
+		rc = msm_ispif_start_frame_boundary(ispif, &pcdata->params);
+		/* DEBUG: the routing, after the start */
 		{
 			int k;
-			for (k = 0; k < 16; k++)
+			pr_err("DEBUG: ISPIF CTRL_0 0x%08x, CID_MASK0 0x%08x, CROP0 0x%08x\n",
+				msm_camera_io_r(ispif->base + ISPIF_VFE_m_CTRL_0(0)),
+				msm_camera_io_r(ispif->base +
+					ISPIF_VFE_m_PIX_INTF_n_CID_MASK(0, 0)),
+				msm_camera_io_r(ispif->base +
+					ISPIF_VFE_m_PIX_INTF_n_CROP(0, 0)));
+			for (k = 0; k < 24; k++)
 				pr_err("DEBUG: ISPIF reg 0x%03x = 0x%08x\n",
-					0x200 + 4 * k,
-					msm_camera_io_r(ispif->base + 0x200 + 4 * k));
+					0x240 + 4 * k,
+					msm_camera_io_r(ispif->base + 0x240 + 4 * k));
 		}
-		rc = msm_ispif_start_frame_boundary(ispif, &pcdata->params);
 		msm_ispif_io_dump_reg(ispif);
 		break;
 	case ISPIF_STOP_FRAME_BOUNDARY:
