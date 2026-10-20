@@ -14,6 +14,8 @@
 
 
 #include <linux/delay.h>
+#include <linux/cred.h>
+#include <linux/init_task.h>
 #include <linux/clk.h>
 #include <linux/firmware.h>
 #include <linux/io.h>

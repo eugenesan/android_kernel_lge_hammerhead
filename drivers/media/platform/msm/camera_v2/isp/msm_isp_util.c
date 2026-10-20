@@ -10,6 +10,8 @@
  * GNU General Public License for more details.
  */
 #include <linux/mutex.h>
+#include <linux/cred.h>
+#include <linux/init_task.h>
 #include <linux/io.h>
 #include <media/v4l2-subdev.h>
 #include <linux/ratelimit.h>
