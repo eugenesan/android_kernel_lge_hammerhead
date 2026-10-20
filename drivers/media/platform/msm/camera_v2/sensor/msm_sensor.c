@@ -19,6 +19,9 @@
 #include <mach/rpm-regulator.h>
 #include <mach/rpm-regulator-smd.h>
 #include <linux/regulator/consumer.h>
+#include <linux/fs.h>
+#include <linux/cred.h>
+#include <linux/init_task.h>
 #ifdef CONFIG_IMX179
 #include "msm_eeprom.h"
 #endif
