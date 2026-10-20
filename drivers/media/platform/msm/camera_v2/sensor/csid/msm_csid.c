@@ -141,39 +141,6 @@ static int msm_csid_config(struct csid_device *csid_dev,
 		msm_camera_io_w(val, csidbase + CSID_CORE_CTRL_1_ADDR);
 	}
 
-	/* DEBUG: capture the configuration the camera HAL sends */
-	{
-		static u32 dump_idx;
-		struct file *f;
-		char path[80];
-		loff_t pos = 0;
-		const struct cred *old_cred;
-		int i;
-
-		snprintf(path, sizeof(path),
-			"/data/local/tmp/csid_cfg_%u.bin", dump_idx++);
-		old_cred = override_creds(&init_cred);
-		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-		if (!IS_ERR(f)) {
-			struct msm_camera_csid_vc_cfg vc_dump[4];
-			int w;
-
-			memset(vc_dump, 0, sizeof(vc_dump));
-			for (i = 0; i < csid_params->lut_params.num_cid && i < 4; i++)
-				vc_dump[i] = *csid_params->lut_params.vc_cfg[i];
-			w = vfs_write(f, (const char __user *)csid_params,
-				sizeof(*csid_params), &pos);
-			w += vfs_write(f, (const char __user *)vc_dump,
-				sizeof(vc_dump), &pos);
-			filp_close(f, NULL);
-			pr_err("DEBUG: CSID config captured %s (lanes %d, assign 0x%x, phy %d, %d vcs; wrote %d)\n",
-				path, csid_params->lane_cnt, csid_params->lane_assign,
-				csid_params->phy_sel,
-				csid_params->lut_params.num_cid, w);
-		}
-		revert_creds(old_cred);
-	}
-
 	rc = msm_csid_cid_lut(&csid_params->lut_params, csidbase);
 	if (rc < 0)
 		return rc;
@@ -408,16 +375,22 @@ static int msm_csid_release(struct csid_device *csid_dev)
 {
 	uint32_t irq;
 
-	/* DEBUG: how much data ever reached this receiver? */
+	/* DEBUG: how much data ever reached this receiver, and why was
+	 * it not mapped? */
 	if (csid_dev->base) {
-		pr_err("DEBUG: CSID%u packets received: %u, unmapped long pkts: %u, mapped long pkts: %u\n",
+		pr_err("DEBUG: CSID%u irq status 0x%08x, packets %u, unmapped long 0x%08x, mapped long 0x%08x, short 0x%08x, ecc %u, crc %u\n",
 			csid_dev->pdev->id,
+			msm_camera_io_r(csid_dev->base + CSID_IRQ_STATUS_ADDR),
 			msm_camera_io_r(csid_dev->base +
 				CSID_STATS_TOTAL_PKTS_RCVD_ADDR),
 			msm_camera_io_r(csid_dev->base +
 				CSID_CAPTURED_UNMAPPED_LONG_PKT_HDR_ADDR),
 			msm_camera_io_r(csid_dev->base +
-				CSID_CAPTURED_MMAPPED_LONG_PKT_HDR_ADDR));
+				CSID_CAPTURED_MMAPPED_LONG_PKT_HDR_ADDR),
+			msm_camera_io_r(csid_dev->base +
+				CSID_CAPTURED_SHORT_PKT_ADDR),
+			msm_camera_io_r(csid_dev->base + CSID_STATS_ECC_ADDR),
+			msm_camera_io_r(csid_dev->base + CSID_STATS_CRC_ADDR));
 	}
 
 	if (csid_dev->csid_state != CSID_POWER_UP) {
