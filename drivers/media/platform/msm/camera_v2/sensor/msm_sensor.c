@@ -1417,14 +1417,14 @@ static void msm_sensor_capture_cfg(int cfgtype, void *cfg, unsigned int size)
 	if (!cfg || !size)
 		return;
 	snprintf(path, sizeof(path),
-		"/data/local/tmp/sensor_cfg_%u_t%d_s%u.bin",
+		"/data/local/tmp/sensorio_%u_t%d_s%u.bin",
 		dump_idx++, cfgtype, size);
 	old_cred = override_creds(&init_cred);
 	f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 	if (!IS_ERR(f)) {
 		int w = vfs_write(f, (const char __user *)cfg, size, &pos);
 		filp_close(f, NULL);
-		pr_err("DEBUG: sensor cfg captured %s (wrote %d)\n", path, w);
+		pr_err("DEBUG: sensor ioctl captured %s (wrote %d)\n", path, w);
 	}
 	revert_creds(old_cred);
 }
@@ -1572,6 +1572,32 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
 			break;
+		}
+
+		/* DEBUG: capture the register array itself */
+		{
+			static u32 dump_idx;
+			struct file *f;
+			char path[80];
+			loff_t pos = 0;
+			const struct cred *old_cred;
+
+			snprintf(path, sizeof(path),
+				"/data/local/tmp/sensor_cfg_%u_n%d.bin",
+				dump_idx++, conf_array.size);
+			old_cred = override_creds(&init_cred);
+			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			if (!IS_ERR(f)) {
+				int w = vfs_write(f,
+					(const char __user *)conf_array.reg_setting,
+					sizeof(struct msm_camera_i2c_reg_array) *
+						conf_array.size,
+					&pos);
+				filp_close(f, NULL);
+				pr_err("DEBUG: sensor array captured %s (%d regs, wrote %d)\n",
+					path, conf_array.size, w);
+			}
+			revert_creds(old_cred);
 		}
 
 
