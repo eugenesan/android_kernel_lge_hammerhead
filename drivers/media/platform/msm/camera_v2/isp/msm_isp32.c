@@ -583,6 +583,15 @@ static void msm_vfe32_update_camif_state(
 	} else if (update_state == DISABLE_CAMIF) {
 		msm_camera_io_w_mb(0x0, vfe_dev->vfe_base + 0x1E0);
 		vfe_dev->axi_data.src_info[VFE_PIX_0].active = 0;
+		/* DEBUG: the VFE's camera front end, as programmed */
+		pr_err("DEBUG: VFE camif: 0x1E0 0x%08x 0x1E4 0x%08x 0x1EC 0x%08x 0x1F0 0x%08x 0x1F4 0x%08x 0x6FC 0x%08x 0x14 0x%08x\n",
+			msm_camera_io_r(vfe_dev->vfe_base + 0x1E0),
+			msm_camera_io_r(vfe_dev->vfe_base + 0x1E4),
+			msm_camera_io_r(vfe_dev->vfe_base + 0x1EC),
+			msm_camera_io_r(vfe_dev->vfe_base + 0x1F0),
+			msm_camera_io_r(vfe_dev->vfe_base + 0x1F4),
+			msm_camera_io_r(vfe_dev->vfe_base + 0x6FC),
+			msm_camera_io_r(vfe_dev->vfe_base + 0x14));
 	} else if (update_state == DISABLE_CAMIF_IMMEDIATELY) {
 		msm_camera_io_w_mb(0x6, vfe_dev->vfe_base + 0x1E0);
 		vfe_dev->hw_info->vfe_ops.axi_ops.halt(vfe_dev);
