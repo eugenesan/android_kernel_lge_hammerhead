@@ -716,16 +716,20 @@ int msm_isp_proc_cmd(struct vfe_device *vfe_dev, void *arg)
 		 * /data/local/tmp -- do it as root */
 		old_cred = override_creds(&init_cred);
 		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		if (!IS_ERR(f)) {
-			vfs_write(f, (const char __user *)hdr, sizeof(hdr), &pos);
-			vfs_write(f, (const char __user *)proc_cmd->cfg_cmd,
+		if (IS_ERR(f)) {
+			pr_err("DEBUG: capture failed: %s (%d)\n",
+				path, (int)PTR_ERR(f));
+		} else {
+			int w1 = vfs_write(f, (const char __user *)hdr,
+				sizeof(hdr), &pos);
+			int w2 = vfs_write(f, (const char __user *)proc_cmd->cfg_cmd,
 				sizeof(struct msm_vfe_reg_cfg_cmd) *
 					proc_cmd->num_cfg, &pos);
-			vfs_write(f, (const char __user *)proc_cmd->cfg_data,
+			int w3 = vfs_write(f, (const char __user *)proc_cmd->cfg_data,
 				proc_cmd->cmd_len, &pos);
 			filp_close(f, NULL);
-			pr_err("DEBUG: captured %s (%u blocks, %u bytes)\n",
-				path, proc_cmd->num_cfg, proc_cmd->cmd_len);
+			pr_err("DEBUG: captured %s (%u blocks, %u bytes; wrote %d %d %d)\n",
+				path, proc_cmd->num_cfg, proc_cmd->cmd_len, w1, w2, w3);
 		}
 		revert_creds(old_cred);
 	}

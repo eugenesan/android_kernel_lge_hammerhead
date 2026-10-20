@@ -1279,15 +1279,20 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 			"/data/local/tmp/cpp_cfg_%u.bin", dump_idx++);
 		old_cred = override_creds(&init_cred);
 		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		if (!IS_ERR(f)) {
-			vfs_write(f, (const char __user *)hdr, sizeof(hdr), &pos);
+		if (IS_ERR(f)) {
+			pr_err("DEBUG: capture failed: %s (%d)\n",
+				path, (int)PTR_ERR(f));
+		} else {
+			int w1 = vfs_write(f, (const char __user *)hdr,
+				sizeof(hdr), &pos);
 			/* cpp_cmd_msg is the user's buffer -- the one
 			 * copy_from_user() can reach */
-			vfs_write(f, (const char __user *)new_frame->cpp_cmd_msg,
+			int w2 = vfs_write(f,
+				(const char __user *)new_frame->cpp_cmd_msg,
 				sizeof(uint32_t) * new_frame->msg_len, &pos);
 			filp_close(f, NULL);
-			pr_err("DEBUG: captured %s (%u words)\n",
-				path, new_frame->msg_len);
+			pr_err("DEBUG: captured %s (%u words; wrote %d %d)\n",
+				path, new_frame->msg_len, w1, w2);
 		}
 		revert_creds(old_cred);
 	}

@@ -358,6 +358,25 @@ static void __init setup_command_line(char *command_line)
 
 static __initdata DECLARE_COMPLETION(kthreadd_done);
 
+/*
+ * DEBUG (temporary): run SELinux permissive.
+ *
+ * The ROM's init switches SELinux back to enforcing, so on this kernel
+ * the shell cannot read the kernel log and the camera daemon cannot
+ * create the file the capture wants to write.  Both are needed to find
+ * out what the camera HAL uploads, so for the diagnostic build the
+ * kernel keeps SELinux permissive.
+ */
+static int __init debug_selinux_permissive(void)
+{
+	extern int selinux_enforcing;
+
+	selinux_enforcing = 0;
+	printk(KERN_INFO "DEBUG: SELinux set to permissive\n");
+	return 0;
+}
+late_initcall(debug_selinux_permissive);
+
 static noinline void __init_refok rest_init(void)
 {
 	int pid;
