@@ -375,6 +375,18 @@ static int msm_csid_release(struct csid_device *csid_dev)
 {
 	uint32_t irq;
 
+	/* DEBUG: the VC LUT the camera HAL's configuration produced */
+	if (csid_dev->base) {
+		pr_err("DEBUG: CSID%u LUT: vc0 0x%08x vc1 0x%08x vc2 0x%08x vc3 0x%08x, cfg0 0x%08x cfg1 0x%08x\n",
+			csid_dev->pdev->id,
+			msm_camera_io_r(csid_dev->base + CSID_CID_LUT_VC_0_ADDR),
+			msm_camera_io_r(csid_dev->base + CSID_CID_LUT_VC_1_ADDR),
+			msm_camera_io_r(csid_dev->base + CSID_CID_LUT_VC_2_ADDR),
+			msm_camera_io_r(csid_dev->base + CSID_CID_LUT_VC_3_ADDR),
+			msm_camera_io_r(csid_dev->base + CSID_CID_n_CFG_ADDR),
+			msm_camera_io_r(csid_dev->base + CSID_CID_n_CFG_ADDR + 4));
+	}
+
 	/* DEBUG: how much data ever reached this receiver, and why was
 	 * it not mapped? */
 	if (csid_dev->base) {
