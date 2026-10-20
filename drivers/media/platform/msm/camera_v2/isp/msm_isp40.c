@@ -386,14 +386,19 @@ static void msm_vfe40_process_violation_status(
 
 	/* DEBUG: which check failed, and what the CAMIF was told */
 	pr_err("DEBUG: camif violation status 0x%08x\n", violation_status);
-	pr_err("DEBUG: camif regs: 0x1E0 0x%08x 0x1E4 0x%08x 0x1EC 0x%08x 0x1F0 0x%08x 0x1F4 0x%08x 0x6FC 0x%08x 0x14 0x%08x\n",
-		msm_camera_io_r(vfe_dev->vfe_base + 0x1E0),
-		msm_camera_io_r(vfe_dev->vfe_base + 0x1E4),
-		msm_camera_io_r(vfe_dev->vfe_base + 0x1EC),
-		msm_camera_io_r(vfe_dev->vfe_base + 0x1F0),
-		msm_camera_io_r(vfe_dev->vfe_base + 0x1F4),
-		msm_camera_io_r(vfe_dev->vfe_base + 0x6FC),
-		msm_camera_io_r(vfe_dev->vfe_base + 0x14));
+	pr_err("DEBUG: camif regs: 0x1C 0x%08x 0x2E8 0x%08x 0x2F4 0x%08x 0x300 0x%08x 0x304 0x%08x 0x308 0x%08x 0x314 0x%08x 0x31C 0x%08x\n",
+		msm_camera_io_r(vfe_dev->vfe_base + 0x1C),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x2E8),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x2F4),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x300),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x304),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x308),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x314),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x31C));
+	pr_err("DEBUG: camif configured: clock %u, width %u, height %u\n",
+		vfe_dev->axi_data.src_info[VFE_PIX_0].pixel_clock,
+		vfe_dev->axi_data.src_info[VFE_PIX_0].width,
+		vfe_dev->axi_data.src_info[VFE_PIX_0].height);
 
 	if (violation_status & (1 << 0))
 		pr_err("%s: camif violation\n", __func__);
