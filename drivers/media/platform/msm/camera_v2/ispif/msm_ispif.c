@@ -957,14 +957,30 @@ static long msm_ispif_subdev_ioctl(struct v4l2_subdev *sd,
 			const struct cred *old_cred;
 			struct ispif_cfg_data *d = (struct ispif_cfg_data *)arg;
 
+			if (d->cfg_type == ISPIF_CFG ||
+				d->cfg_type == ISPIF_START_FRAME_BOUNDARY) {
+				int k;
+				pr_err("DEBUG: ISP-IF routing: %d entries\n",
+					d->params.num);
+				for (k = 0; k < d->params.num && k < 4; k++)
+					pr_err("DEBUG:   entry %d: vfe_intf %d intftype %d num_cids %d cid0 %d csid %d crop %d (%d..%d)\n",
+						k, d->params.entries[k].vfe_intf,
+						d->params.entries[k].intftype,
+						d->params.entries[k].num_cids,
+						d->params.entries[k].cids[0],
+						d->params.entries[k].csid,
+						d->params.entries[k].crop_enable,
+						d->params.entries[k].crop_start_pixel,
+						d->params.entries[k].crop_end_pixel);
+			}
 			snprintf(path, sizeof(path),
-				"/data/local/tmp/ispif_cfg_%u_t%d.bin",
-				dump_idx++, d->cfg_type);
+				"/data/local/tmp/ispif_cfg_%u_t%d_s%u.bin",
+				dump_idx++, d->cfg_type, _IOC_SIZE(cmd));
 			old_cred = override_creds(&init_cred);
 			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 			if (!IS_ERR(f)) {
 				int w = vfs_write(f, (const char __user *)arg,
-					sizeof(struct ispif_cfg_data), &pos);
+					_IOC_SIZE(cmd), &pos);
 				filp_close(f, NULL);
 				pr_err("DEBUG: ISP-IF config captured %s (wrote %d)\n",
 					path, w);
