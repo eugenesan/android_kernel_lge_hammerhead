@@ -384,6 +384,17 @@ static void msm_vfe40_process_violation_status(
 	if (!violation_status)
 		return;
 
+	/* DEBUG: which check failed, and what the CAMIF was told */
+	pr_err("DEBUG: camif violation status 0x%08x\n", violation_status);
+	pr_err("DEBUG: camif regs: 0x1E0 0x%08x 0x1E4 0x%08x 0x1EC 0x%08x 0x1F0 0x%08x 0x1F4 0x%08x 0x6FC 0x%08x 0x14 0x%08x\n",
+		msm_camera_io_r(vfe_dev->vfe_base + 0x1E0),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x1E4),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x1EC),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x1F0),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x1F4),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x6FC),
+		msm_camera_io_r(vfe_dev->vfe_base + 0x14));
+
 	if (violation_status & (1 << 0))
 		pr_err("%s: camif violation\n", __func__);
 	if (violation_status & (1 << 1))

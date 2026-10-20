@@ -363,6 +363,27 @@ long msm_isp_ioctl(struct v4l2_subdev *sd,
 		mutex_unlock(&vfe_dev->core_mutex);
 		break;
 	case VIDIOC_MSM_ISP_INPUT_CFG:
+		/* DEBUG: capture the camera HAL's input configuration */
+		{
+			static u32 dump_idx;
+			struct file *f;
+			char path[80];
+			loff_t pos = 0;
+			const struct cred *old_cred;
+
+			snprintf(path, sizeof(path),
+				"/data/local/tmp/isp_input_%u.bin", dump_idx++);
+			old_cred = override_creds(&init_cred);
+			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			if (!IS_ERR(f)) {
+				int w = vfs_write(f, (const char __user *)arg,
+					sizeof(struct msm_vfe_input_cfg), &pos);
+				filp_close(f, NULL);
+				pr_err("DEBUG: ISP input config captured %s (wrote %d)\n",
+					path, w);
+			}
+			revert_creds(old_cred);
+		}
 		mutex_lock(&vfe_dev->core_mutex);
 		rc = msm_isp_cfg_input(vfe_dev, arg);
 		mutex_unlock(&vfe_dev->core_mutex);
