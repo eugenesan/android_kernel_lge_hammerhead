@@ -960,18 +960,29 @@ static long msm_ispif_subdev_ioctl(struct v4l2_subdev *sd,
 			if (d->cfg_type == ISPIF_CFG ||
 				d->cfg_type == ISPIF_START_FRAME_BOUNDARY) {
 				int k;
-				pr_err("DEBUG: ISP-IF routing: %d entries\n",
-					d->params.num);
-				for (k = 0; k < d->params.num && k < 4; k++)
-					pr_err("DEBUG:   entry %d: vfe_intf %d intftype %d num_cids %d cid0 %d csid %d crop %d (%d..%d)\n",
-						k, d->params.entries[k].vfe_intf,
-						d->params.entries[k].intftype,
-						d->params.entries[k].num_cids,
-						d->params.entries[k].cids[0],
-						d->params.entries[k].csid,
-						d->params.entries[k].crop_enable,
-						d->params.entries[k].crop_start_pixel,
+				pr_err("DEBUG: ISP-IF cfg type %d, %d entries\n",
+					d->cfg_type, d->params.num);
+				for (k = 0; k < d->params.num && k < 4; k++) {
+					pr_err("DEBUG: ISP-IF entry %d\n", k);
+					pr_err("DEBUG:   vfe_intf %d\n",
+						d->params.entries[k].vfe_intf);
+					pr_err("DEBUG:   intftype %d\n",
+						d->params.entries[k].intftype);
+					pr_err("DEBUG:   num_cids %d\n",
+						d->params.entries[k].num_cids);
+					pr_err("DEBUG:   cid0 %d\n",
+						d->params.entries[k].cids[0]);
+					pr_err("DEBUG:   cid1 %d\n",
+						d->params.entries[k].cids[1]);
+					pr_err("DEBUG:   csid %d\n",
+						d->params.entries[k].csid);
+					pr_err("DEBUG:   crop_enable %d\n",
+						d->params.entries[k].crop_enable);
+					pr_err("DEBUG:   crop_start %d\n",
+						d->params.entries[k].crop_start_pixel);
+					pr_err("DEBUG:   crop_end %d\n",
 						d->params.entries[k].crop_end_pixel);
+				}
 			}
 			snprintf(path, sizeof(path),
 				"/data/local/tmp/ispif_cfg_%u_t%d_s%u.bin",
@@ -980,7 +991,7 @@ static long msm_ispif_subdev_ioctl(struct v4l2_subdev *sd,
 			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 			if (!IS_ERR(f)) {
 				int w = vfs_write(f, (const char __user *)arg,
-					_IOC_SIZE(cmd), &pos);
+					16, &pos);
 				filp_close(f, NULL);
 				pr_err("DEBUG: ISP-IF config captured %s (wrote %d)\n",
 					path, w);
