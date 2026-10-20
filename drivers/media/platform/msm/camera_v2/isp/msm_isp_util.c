@@ -730,10 +730,6 @@ int msm_isp_proc_cmd(struct vfe_device *vfe_dev, void *arg)
 		 * /data/local/tmp -- do it as root */
 		old_cred = override_creds(&init_cred);
 		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-		if (!IS_ERR(f))
-			/* the umask of the camera daemon would take the
-			 * bits away again */
-			vfs_chmod(f->f_path.dentry, 0666);
 		if (IS_ERR(f)) {
 			pr_err("DEBUG: capture failed: %s (%d)\n",
 				path, (int)PTR_ERR(f));
