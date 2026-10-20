@@ -1265,26 +1265,29 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 	/* DEBUG: capture the chromatrix the camera HAL sent to the CPP. */
 	{
 		static u32 dump_idx;
+		static char path[80];
+		static u32 hdr[2];
 		struct file *f;
-		char path[80];
 		loff_t pos = 0;
-		u32 hdr[2];
+		const struct cred *old_cred;
 
 		hdr[0] = new_frame->msg_len;
 		hdr[1] = new_frame->frame_type;
 		snprintf(path, sizeof(path),
 			"/data/local/tmp/cpp_cfg_%u.bin", dump_idx++);
+		old_cred = override_creds(&init_cred);
 		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		if (f) {
-			set_fs(KERNEL_DS);
+		if (!IS_ERR(f)) {
 			vfs_write(f, (const char __user *)hdr, sizeof(hdr), &pos);
-			vfs_write(f, (const char __user *)cpp_frame_msg,
+			/* cpp_cmd_msg is the user's buffer -- the one
+			 * copy_from_user() can reach */
+			vfs_write(f, (const char __user *)new_frame->cpp_cmd_msg,
 				sizeof(uint32_t) * new_frame->msg_len, &pos);
-			set_fs(USER_DS);
 			filp_close(f, NULL);
 			pr_err("DEBUG: captured %s (%u words)\n",
 				path, new_frame->msg_len);
 		}
+		revert_creds(old_cred);
 	}
 	if (cpp_frame_msg == NULL ||
 		(new_frame->msg_len < MSM_CPP_MIN_FRAME_LENGTH)) {

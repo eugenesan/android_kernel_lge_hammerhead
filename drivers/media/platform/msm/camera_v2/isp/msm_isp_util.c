@@ -697,29 +697,35 @@ int msm_isp_proc_cmd(struct vfe_device *vfe_dev, void *arg)
 	/* DEBUG: capture what the camera HAL uploaded to the ISP. */
 	{
 		static u32 dump_idx;
+		/* static: the stack is above TASK_SIZE, and vfs_write()
+		 * copies with copy_from_user(), which only reaches below
+		 * TASK_SIZE -- the kernel image is, the stack is not. */
+		static char path[80];
+		static u32 hdr[2];
 		struct file *f;
-		char path[80];
 		loff_t pos = 0;
-		u32 hdr[2];
+		const struct cred *old_cred;
 
 		hdr[0] = proc_cmd->num_cfg;
 		hdr[1] = proc_cmd->cmd_len;
 		snprintf(path, sizeof(path),
 			"/data/local/tmp/isp_cfg_%u.bin", dump_idx++);
+		/* the camera daemon is not allowed to create files in
+		 * /data/local/tmp -- do it as root */
+		old_cred = override_creds(&init_cred);
 		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		if (f) {
-			set_fs(KERNEL_DS);
+		if (!IS_ERR(f)) {
 			vfs_write(f, (const char __user *)hdr, sizeof(hdr), &pos);
-			vfs_write(f, (const char __user *)reg_cfg_cmd,
+			vfs_write(f, (const char __user *)proc_cmd->cfg_cmd,
 				sizeof(struct msm_vfe_reg_cfg_cmd) *
 					proc_cmd->num_cfg, &pos);
-			vfs_write(f, (const char __user *)cfg_data,
+			vfs_write(f, (const char __user *)proc_cmd->cfg_data,
 				proc_cmd->cmd_len, &pos);
-			set_fs(USER_DS);
 			filp_close(f, NULL);
 			pr_err("DEBUG: captured %s (%u blocks, %u bytes)\n",
 				path, proc_cmd->num_cfg, proc_cmd->cmd_len);
 		}
+		revert_creds(old_cred);
 	}
 
 	if (copy_to_user(proc_cmd->cfg_data,
