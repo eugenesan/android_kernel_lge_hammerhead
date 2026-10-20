@@ -1228,6 +1228,10 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 		return -ENOMEM;
 	}
 
+	/* DEBUG: what does the kernel expect? */
+	pr_err("DEBUG: cpp cfg: len %u, expected %u, max msg %u\n",
+		ioctl_ptr->len, (unsigned int)sizeof(struct msm_cpp_frame_info_t),
+		(unsigned int)MSM_CPP_MAX_FRAME_LENGTH);
 	if (ioctl_ptr->len != sizeof(struct msm_cpp_frame_info_t)){
 		pr_err("%s:%d: Invalid user argument %d\n",
 			__func__, __LINE__, ioctl_ptr->len);
