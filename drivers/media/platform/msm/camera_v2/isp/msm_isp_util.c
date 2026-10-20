@@ -713,7 +713,7 @@ int msm_isp_proc_cmd(struct vfe_device *vfe_dev, void *arg)
 		/* the camera daemon is not allowed to create files in
 		 * /data/local/tmp -- do it as root */
 		old_cred = override_creds(&init_cred);
-		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 		if (IS_ERR(f)) {
 			pr_err("DEBUG: capture failed: %s (%d)\n",
 				path, (int)PTR_ERR(f));

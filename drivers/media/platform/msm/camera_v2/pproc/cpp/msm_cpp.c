@@ -1283,7 +1283,7 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 			"/data/local/tmp/cpp_cfg_%u_len%u.bin", dump_idx++,
 			new_frame->msg_len);
 		old_cred = override_creds(&init_cred);
-		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 		if (IS_ERR(f)) {
 			pr_err("DEBUG: capture failed: %s (%d)\n",
 				path, (int)PTR_ERR(f));
