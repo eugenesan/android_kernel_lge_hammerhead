@@ -1206,6 +1206,22 @@ int msm_isp_cfg_axi_stream(struct vfe_device *vfe_dev, void *arg)
 		vfe_dev->hw_info->vfe_ops.axi_ops.cfg_ub(vfe_dev);
 	}
 	camif_update = msm_isp_get_camif_update_state(vfe_dev, stream_cfg_cmd);
+	/* DEBUG: what did the CAMIF state come out as? */
+	{
+		int k;
+		pr_err("DEBUG: camif_update %d, num_streams %u, cmd %u\n",
+			(int)camif_update, stream_cfg_cmd->num_streams,
+			stream_cfg_cmd->cmd);
+		for (k = 0; k < stream_cfg_cmd->num_streams; k++) {
+			struct msm_vfe_axi_stream *si =
+				&axi_data->stream_info[HANDLE_TO_IDX(
+					stream_cfg_cmd->stream_handle[k])];
+			pr_err("DEBUG:   stream %d: src %d, pix_count %u, raw_count %u\n",
+				k, si->stream_src,
+				axi_data->src_info[VFE_PIX_0].pix_stream_count,
+				axi_data->src_info[VFE_PIX_0].raw_stream_count);
+		}
+	}
 
 	if (stream_cfg_cmd->cmd == START_STREAM)
 		rc = msm_isp_start_axi_stream(
