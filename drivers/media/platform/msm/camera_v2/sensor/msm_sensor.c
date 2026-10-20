@@ -1538,6 +1538,34 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 			break;
 		}
 
+		/* DEBUG: capture the register array the camera HAL sends
+		 * us, so that our own imaging server can replay exactly
+		 * what the vendor sends (and in what order). */
+		{
+			static u32 dump_idx;
+			struct file *f;
+			char path[80];
+			loff_t pos = 0;
+			const struct cred *old_cred;
+			int n = conf_array.size;
+
+			snprintf(path, sizeof(path),
+				"/data/local/tmp/sensor_cfg_%u_t%d_n%d.bin",
+				dump_idx++, cdata->cfgtype, n);
+			old_cred = override_creds(&init_cred);
+			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			if (!IS_ERR(f)) {
+				int w = vfs_write(f,
+					(const char __user *)conf_array.reg_setting,
+					sizeof(struct msm_camera_i2c_reg_array) * n,
+					&pos);
+				filp_close(f, NULL);
+				pr_err("DEBUG: sensor config captured %s (%d regs, wrote %d)\n",
+					path, n, w);
+			}
+			revert_creds(old_cred);
+		}
+
 		reg_setting = kzalloc(conf_array.size *
 			(sizeof(struct msm_camera_i2c_reg_array)), GFP_KERNEL);
 		if (!reg_setting) {
