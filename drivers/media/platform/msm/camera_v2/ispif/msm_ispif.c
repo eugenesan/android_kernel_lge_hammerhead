@@ -13,6 +13,9 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/fs.h>
+#include <linux/cred.h>
+#include <linux/init_task.h>
 #include <linux/jiffies.h>
 #include <linux/of.h>
 #include <linux/videodev2.h>
@@ -944,6 +947,30 @@ static long msm_ispif_subdev_ioctl(struct v4l2_subdev *sd,
 {
 	switch (cmd) {
 	case VIDIOC_MSM_ISPIF_CFG:
+		/* DEBUG: capture what the camera HAL sends us.  The
+		 * buffer is the user's, so vfs_write() can copy it. */
+		{
+			static u32 dump_idx;
+			struct file *f;
+			char path[80];
+			loff_t pos = 0;
+			const struct cred *old_cred;
+			struct ispif_cfg_data *d = (struct ispif_cfg_data *)arg;
+
+			snprintf(path, sizeof(path),
+				"/data/local/tmp/ispif_cfg_%u_t%d.bin",
+				dump_idx++, d->cfg_type);
+			old_cred = override_creds(&init_cred);
+			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			if (!IS_ERR(f)) {
+				int w = vfs_write(f, (const char __user *)arg,
+					sizeof(struct ispif_cfg_data), &pos);
+				filp_close(f, NULL);
+				pr_err("DEBUG: ISP-IF config captured %s (wrote %d)\n",
+					path, w);
+			}
+			revert_creds(old_cred);
+		}
 		return msm_ispif_cmd(sd, arg);
 	case MSM_SD_SHUTDOWN: {
 		return 0;
