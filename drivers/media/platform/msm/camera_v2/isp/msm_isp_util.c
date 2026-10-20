@@ -10,6 +10,7 @@
  * GNU General Public License for more details.
  */
 #include <linux/mutex.h>
+#include <linux/fs.h>
 #include <linux/cred.h>
 #include <linux/init_task.h>
 #include <linux/io.h>
