@@ -391,6 +391,21 @@ static int msm_ispif_config(struct ispif_device *ispif,
 		return rc;
 	}
 
+	/* DEBUG: what routing did the camera HAL ask for? */
+	for (i = 0; i < params->num && i < 4; i++) {
+		pr_err("DEBUG: ISP-IF routing %d: vfe_intf %d intftype %d num_cids %d cid0 %d cid1 %d csid %d crop %d (%d..%d)\n",
+			i,
+			params->entries[i].vfe_intf,
+			params->entries[i].intftype,
+			params->entries[i].num_cids,
+			params->entries[i].cids[0],
+			params->entries[i].cids[1],
+			params->entries[i].csid,
+			params->entries[i].crop_enable,
+			params->entries[i].crop_start_pixel,
+			params->entries[i].crop_end_pixel);
+	}
+
 	for (i = 0; i < params->num; i++) {
 		vfe_intf = params->entries[i].vfe_intf;
 		if (!msm_ispif_is_intf_valid(ispif->csid_version,
@@ -947,45 +962,6 @@ static long msm_ispif_subdev_ioctl(struct v4l2_subdev *sd,
 {
 	switch (cmd) {
 	case VIDIOC_MSM_ISPIF_CFG:
-		/* DEBUG: capture what the camera HAL sends us.  The
-		 * buffer is the user's, so vfs_write() can copy it. */
-		{
-			static u32 dump_idx;
-			struct file *f;
-			char path[80];
-			loff_t pos = 0;
-			const struct cred *old_cred;
-			struct ispif_cfg_data *d = (struct ispif_cfg_data *)arg;
-
-			if (d->cfg_type == ISPIF_CFG ||
-				d->cfg_type == ISPIF_START_FRAME_BOUNDARY) {
-				unsigned char *u = (unsigned char *)arg;
-				int k;
-
-				pr_err("DEBUG: ISP-IF raw payload, cfg type %d\n",
-					d->cfg_type);
-				for (k = 0; k < 64; k += 16) {
-					pr_err("DEBUG:   %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
-						u[k + 0], u[k + 1], u[k + 2], u[k + 3],
-						u[k + 4], u[k + 5], u[k + 6], u[k + 7],
-						u[k + 8], u[k + 9], u[k + 10], u[k + 11],
-						u[k + 12], u[k + 13], u[k + 14], u[k + 15]);
-				}
-			}
-			snprintf(path, sizeof(path),
-				"/data/local/tmp/ispif_cfg_%u_t%d_s%u.bin",
-				dump_idx++, d->cfg_type, _IOC_SIZE(cmd));
-			old_cred = override_creds(&init_cred);
-			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-			if (!IS_ERR(f)) {
-				int w = vfs_write(f, (const char __user *)arg,
-					16, &pos);
-				filp_close(f, NULL);
-				pr_err("DEBUG: ISP-IF config captured %s (wrote %d)\n",
-					path, w);
-			}
-			revert_creds(old_cred);
-		}
 		return msm_ispif_cmd(sd, arg);
 	case MSM_SD_SHUTDOWN: {
 		return 0;
