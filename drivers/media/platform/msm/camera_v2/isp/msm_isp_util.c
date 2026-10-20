@@ -303,6 +303,19 @@ int msm_isp_cfg_input(struct vfe_device *vfe_dev, void *arg)
 	int rc = 0;
 	struct msm_vfe_input_cfg *input_cfg = arg;
 
+	/* DEBUG: what does the camera HAL ask for? */
+	pr_err("DEBUG: ISP input: src %d, pix_clk %u, mux %d, camif_input %d\n",
+		input_cfg->input_src, input_cfg->input_pix_clk,
+		input_cfg->d.pix_cfg.input_mux,
+		input_cfg->d.pix_cfg.camif_cfg.camif_input);
+	pr_err("DEBUG:   camif: lines %u, pixels %u, first_px %u, last_px %u, first_line %u, last_line %u\n",
+		input_cfg->d.pix_cfg.camif_cfg.lines_per_frame,
+		input_cfg->d.pix_cfg.camif_cfg.pixels_per_line,
+		input_cfg->d.pix_cfg.camif_cfg.first_pixel,
+		input_cfg->d.pix_cfg.camif_cfg.last_pixel,
+		input_cfg->d.pix_cfg.camif_cfg.first_line,
+		input_cfg->d.pix_cfg.camif_cfg.last_line);
+
 	switch (input_cfg->input_src) {
 	case VFE_PIX_0:
 		rc = msm_isp_cfg_pix(vfe_dev, input_cfg);
@@ -363,27 +376,6 @@ long msm_isp_ioctl(struct v4l2_subdev *sd,
 		mutex_unlock(&vfe_dev->core_mutex);
 		break;
 	case VIDIOC_MSM_ISP_INPUT_CFG:
-		/* DEBUG: capture the camera HAL's input configuration */
-		{
-			static u32 dump_idx;
-			struct file *f;
-			char path[80];
-			loff_t pos = 0;
-			const struct cred *old_cred;
-
-			snprintf(path, sizeof(path),
-				"/data/local/tmp/isp_input_%u.bin", dump_idx++);
-			old_cred = override_creds(&init_cred);
-			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-			if (!IS_ERR(f)) {
-				int w = vfs_write(f, (const char __user *)arg,
-					sizeof(struct msm_vfe_input_cfg), &pos);
-				filp_close(f, NULL);
-				pr_err("DEBUG: ISP input config captured %s (wrote %d)\n",
-					path, w);
-			}
-			revert_creds(old_cred);
-		}
 		mutex_lock(&vfe_dev->core_mutex);
 		rc = msm_isp_cfg_input(vfe_dev, arg);
 		mutex_unlock(&vfe_dev->core_mutex);
