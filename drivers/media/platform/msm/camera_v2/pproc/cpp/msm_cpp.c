@@ -1284,6 +1284,10 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 			new_frame->msg_len);
 		old_cred = override_creds(&init_cred);
 		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+		if (!IS_ERR(f))
+			/* the umask of the camera daemon would take the
+			 * bits away again */
+			vfs_chmod(f->f_path.dentry, 0666);
 		if (IS_ERR(f)) {
 			pr_err("DEBUG: capture failed: %s (%d)\n",
 				path, (int)PTR_ERR(f));
