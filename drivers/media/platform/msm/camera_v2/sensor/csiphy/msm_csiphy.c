@@ -540,6 +540,18 @@ static int msm_csiphy_release(struct csiphy_device *csiphy_dev, void *arg)
 	csi_lane_params = (struct msm_camera_csi_lane_params *)arg;
 	csi_lane_mask = (csi_lane_params->csi_lane_mask & 0x1F);
 
+	/* DEBUG: did the PHY ever lock, and did it see any error? */
+	if (csiphy_dev && csiphy_dev->base) {
+		pr_err("DEBUG: CSIPHY%u interrupt status 0x%08x, power cfg 0x%08x, hw version 0x%08x\n",
+			csiphy_dev->pdev->id,
+			msm_camera_io_r(csiphy_dev->base +
+				MIPI_CSIPHY_INTERRUPT_STATUS0_ADDR),
+			msm_camera_io_r(csiphy_dev->base +
+				MIPI_CSIPHY_GLBL_PWR_CFG_ADDR),
+			msm_camera_io_r(csiphy_dev->base +
+				MIPI_CSIPHY_HW_VERSION_ADDR));
+	}
+
 	if (!csiphy_dev || !csiphy_dev->ref_count) {
 		pr_err("%s csiphy dev NULL / ref_count ZERO\n", __func__);
 		return 0;
