@@ -395,10 +395,9 @@ static void msm_vfe40_process_violation_status(
 		msm_camera_io_r(vfe_dev->vfe_base + 0x308),
 		msm_camera_io_r(vfe_dev->vfe_base + 0x314),
 		msm_camera_io_r(vfe_dev->vfe_base + 0x31C));
-	pr_err("DEBUG: camif configured: clock %u, width %u, height %u\n",
+	pr_err("DEBUG: camif configured: clock %u, width %u\n",
 		vfe_dev->axi_data.src_info[VFE_PIX_0].pixel_clock,
-		vfe_dev->axi_data.src_info[VFE_PIX_0].width,
-		vfe_dev->axi_data.src_info[VFE_PIX_0].height);
+		vfe_dev->axi_data.src_info[VFE_PIX_0].width);
 
 	if (violation_status & (1 << 0))
 		pr_err("%s: camif violation\n", __func__);
