@@ -423,6 +423,17 @@ static int msm_csid_release(struct csid_device *csid_dev)
 
 	iounmap(csid_dev->base);
 	csid_dev->base = NULL;
+	/* DEBUG: how much data ever reached this receiver? */
+	if (csid_dev->base) {
+		pr_err("DEBUG: CSID%u packets received: %u, unmapped long pkts: %u, mapped long pkts: %u\n",
+			csid_dev->pdev->id,
+			msm_camera_io_r(csid_dev->base +
+				CSID_STATS_TOTAL_PKTS_RCVD_ADDR),
+			msm_camera_io_r(csid_dev->base +
+				CSID_CAPTURED_UNMAPPED_LONG_PKT_HDR_ADDR),
+			msm_camera_io_r(csid_dev->base +
+				CSID_CAPTURED_MMAPPED_LONG_PKT_HDR_ADDR));
+	}
 	csid_dev->csid_state = CSID_POWER_DOWN;
 	return 0;
 }
