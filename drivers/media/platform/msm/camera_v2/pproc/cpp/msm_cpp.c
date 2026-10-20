@@ -1261,6 +1261,31 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 	}
 
 	new_frame->cpp_cmd_msg = cpp_frame_msg;
+
+	/* DEBUG: capture the chromatrix the camera HAL sent to the CPP. */
+	{
+		static u32 dump_idx;
+		struct file *f;
+		char path[80];
+		loff_t pos = 0;
+		u32 hdr[2];
+
+		hdr[0] = new_frame->msg_len;
+		hdr[1] = new_frame->frame_type;
+		snprintf(path, sizeof(path),
+			"/data/local/tmp/cpp_cfg_%u.bin", dump_idx++);
+		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (f) {
+			set_fs(KERNEL_DS);
+			vfs_write(f, (const char __user *)hdr, sizeof(hdr), &pos);
+			vfs_write(f, (const char __user *)cpp_frame_msg,
+				sizeof(uint32_t) * new_frame->msg_len, &pos);
+			set_fs(USER_DS);
+			filp_close(f, NULL);
+			pr_err("DEBUG: captured %s (%u words)\n",
+				path, new_frame->msg_len);
+		}
+	}
 	if (cpp_frame_msg == NULL ||
 		(new_frame->msg_len < MSM_CPP_MIN_FRAME_LENGTH)) {
 		pr_err("%s %d Length is not correct or frame message is missing\n",
