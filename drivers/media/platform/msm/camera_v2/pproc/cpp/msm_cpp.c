@@ -1215,6 +1215,9 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 	struct msm_buf_mngr_info buff_mgr_info;
 	struct msm_cpp_frame_info_t *u_frame_info =
 		(struct msm_cpp_frame_info_t *)ioctl_ptr->ioctl_ptr;
+	/* DEBUG: the user's chromatrix message, before the driver
+	 * replaces it with its own kernel copy */
+	void __user *user_msg = NULL;
 	int32_t status = 0;
 	int in_fd;
 
@@ -1262,37 +1265,36 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 		goto ERROR2;
 	}
 
+	/* DEBUG: keep the user's pointer: the line below replaces it
+	 * with the kernel copy, which vfs_write() cannot copy from. */
+	user_msg = new_frame->cpp_cmd_msg;
+
 	new_frame->cpp_cmd_msg = cpp_frame_msg;
 
 	/* DEBUG: capture the chromatrix the camera HAL sent to the CPP. */
 	{
 		static u32 dump_idx;
 		static char path[80];
-		static u32 hdr[2];
 		struct file *f;
 		loff_t pos = 0;
 		const struct cred *old_cred;
 
-		hdr[0] = new_frame->msg_len;
-		hdr[1] = new_frame->frame_type;
 		snprintf(path, sizeof(path),
-			"/data/local/tmp/cpp_cfg_%u.bin", dump_idx++);
+			"/data/local/tmp/cpp_cfg_%u_len%u.bin", dump_idx++,
+			new_frame->msg_len);
 		old_cred = override_creds(&init_cred);
 		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 		if (IS_ERR(f)) {
 			pr_err("DEBUG: capture failed: %s (%d)\n",
 				path, (int)PTR_ERR(f));
 		} else {
-			int w1 = vfs_write(f, (const char __user *)hdr,
-				sizeof(hdr), &pos);
-			/* cpp_cmd_msg is the user's buffer -- the one
+			/* user_msg is the user's buffer -- the one
 			 * copy_from_user() can reach */
-			int w2 = vfs_write(f,
-				(const char __user *)new_frame->cpp_cmd_msg,
+			int w2 = vfs_write(f, (const char __user *)user_msg,
 				sizeof(uint32_t) * new_frame->msg_len, &pos);
 			filp_close(f, NULL);
-			pr_err("DEBUG: captured %s (%u words; wrote %d %d)\n",
-				path, new_frame->msg_len, w1, w2);
+			pr_err("DEBUG: captured %s (%u words; wrote %d)\n",
+				path, new_frame->msg_len, w2);
 		}
 		revert_creds(old_cred);
 	}
