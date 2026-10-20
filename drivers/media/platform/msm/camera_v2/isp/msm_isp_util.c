@@ -345,6 +345,8 @@ long msm_isp_ioctl(struct v4l2_subdev *sd,
 	 * which blocks until the hardware start/stop streaming
 	 */
 	ISP_DBG("%s cmd: %d\n", __func__, _IOC_TYPE(cmd));
+	/* DEBUG: the ioctl sequence the camera HAL makes */
+	pr_err("DEBUG: ISP ioctl 0x%08x\n", cmd);
 	switch (cmd) {
 	case VIDIOC_MSM_VFE_REG_CFG: {
 		mutex_lock(&vfe_dev->realtime_mutex);

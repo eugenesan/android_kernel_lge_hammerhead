@@ -1795,6 +1795,7 @@ static long msm_cpp_subdev_do_ioctl(
 	struct v4l2_subdev *sd = vdev_to_v4l2_subdev(vdev);
 	struct v4l2_fh *vfh = file->private_data;
 
+	pr_err("DEBUG: CPP ioctl 0x%08x\n", cmd);
 	switch (cmd) {
 	case VIDIOC_DQEVENT:
 		if (!(sd->flags & V4L2_SUBDEV_FL_HAS_EVENTS))
