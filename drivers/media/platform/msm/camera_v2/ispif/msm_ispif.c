@@ -959,29 +959,17 @@ static long msm_ispif_subdev_ioctl(struct v4l2_subdev *sd,
 
 			if (d->cfg_type == ISPIF_CFG ||
 				d->cfg_type == ISPIF_START_FRAME_BOUNDARY) {
+				unsigned char *u = (unsigned char *)arg;
 				int k;
-				pr_err("DEBUG: ISP-IF cfg type %d, %d entries\n",
-					d->cfg_type, d->params.num);
-				for (k = 0; k < d->params.num && k < 4; k++) {
-					pr_err("DEBUG: ISP-IF entry %d\n", k);
-					pr_err("DEBUG:   vfe_intf %d\n",
-						d->params.entries[k].vfe_intf);
-					pr_err("DEBUG:   intftype %d\n",
-						d->params.entries[k].intftype);
-					pr_err("DEBUG:   num_cids %d\n",
-						d->params.entries[k].num_cids);
-					pr_err("DEBUG:   cid0 %d\n",
-						d->params.entries[k].cids[0]);
-					pr_err("DEBUG:   cid1 %d\n",
-						d->params.entries[k].cids[1]);
-					pr_err("DEBUG:   csid %d\n",
-						d->params.entries[k].csid);
-					pr_err("DEBUG:   crop_enable %d\n",
-						d->params.entries[k].crop_enable);
-					pr_err("DEBUG:   crop_start %d\n",
-						d->params.entries[k].crop_start_pixel);
-					pr_err("DEBUG:   crop_end %d\n",
-						d->params.entries[k].crop_end_pixel);
+
+				pr_err("DEBUG: ISP-IF raw payload, cfg type %d\n",
+					d->cfg_type);
+				for (k = 0; k < 64; k += 16) {
+					pr_err("DEBUG:   %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+						u[k + 0], u[k + 1], u[k + 2], u[k + 3],
+						u[k + 4], u[k + 5], u[k + 6], u[k + 7],
+						u[k + 8], u[k + 9], u[k + 10], u[k + 11],
+						u[k + 12], u[k + 13], u[k + 14], u[k + 15]);
 				}
 			}
 			snprintf(path, sizeof(path),
