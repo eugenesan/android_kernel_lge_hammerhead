@@ -784,8 +784,15 @@ static void cpp_load_fw(struct cpp_device *cpp_dev, char *fw_name_bin)
 				"Fail to loc blob %s from dev %pK, Error: %d\n",
 				fw_name_bin, dev, rc);
 		}
-		if (NULL != fw)
-			ptr_bin = (uint32_t *)fw->data;
+		/* The blob has to be there: the code below dereferences fw
+		 * unconditionally, so a failed request_firmware() used to
+		 * oops the kernel here (the CALL_TRACE was
+		 * msm_camera_io_w+0x0, i.e. the NULL read of fw->size). */
+		if (fw == NULL) {
+			dev_err(dev, "%s: no firmware, giving up\n", __func__);
+			return;
+		}
+		ptr_bin = (uint32_t *)fw->data;
 
 		msm_camera_io_w(0x1, cpp_dev->base +
 					 MSM_CPP_MICRO_BOOT_START);
@@ -1060,6 +1067,11 @@ void msm_cpp_do_timeout_work(struct work_struct *work)
 	struct msm_cpp_frame_info_t *this_frame =
 		cpp_timers[del_timer_idx].data.processed_frame;
 	struct msm_cpp_frame_info_t *second_frame = NULL;
+	/* The device whose timer expired.  The index juggling below moves
+	 * del_timer_idx, and reading cpp_dev from the (then different)
+	 * slot afterwards reloads the firmware on a device that may
+	 * never have been initialised -- a NULL base, and an oops. */
+	struct cpp_device *expired_dev = cpp_timers[del_timer_idx].data.cpp_dev;
 
 	pr_err("cpp_timer_callback called idx:%d. (jiffies=%lu)\n",
 		del_timer_idx, jiffies);
@@ -1078,16 +1090,22 @@ void msm_cpp_do_timeout_work(struct work_struct *work)
 		del_timer_idx = 1 - del_timer_idx;
 	}
 
-	disable_irq(cpp_timers[del_timer_idx].data.cpp_dev->irq->start);
-	pr_err("Reloading firmware\n");
-	cpp_load_fw(cpp_timers[del_timer_idx].data.cpp_dev, NULL);
-	pr_err("Firmware loading done\n");
-	enable_irq(cpp_timers[del_timer_idx].data.cpp_dev->irq->start);
-	msm_camera_io_w_mb(0x8, cpp_timers[del_timer_idx].data.cpp_dev->base +
-		MSM_CPP_MICRO_IRQGEN_MASK);
-	msm_camera_io_w_mb(0xFFFF,
-		cpp_timers[del_timer_idx].data.cpp_dev->base +
-		MSM_CPP_MICRO_IRQGEN_CLR);
+	if (expired_dev == NULL || expired_dev->base == NULL) {
+		/* Nothing to reload: the node is gone. */
+		pr_err("no CPP device to reload the firmware into\n");
+		return;
+	}
+
+	/* The vendor recovers from an expired frame by reloading the
+	 * firmware into the CPP and starting again.  That path writes
+	 * to the CPP's registers from a workqueue, and on this device
+	 * the write aborts (the region is not accessible from there),
+	 * which takes the whole kernel down.  The frame is already
+	 * lost by then, so the reload buys nothing here: log it and
+	 * leave the hardware alone. */
+	pr_err("the frame timed out; not reloading the firmware\n");
+	disable_irq(expired_dev->irq->start);
+	enable_irq(expired_dev->irq->start);
 
 	cpp_timers[set_timer_idx].data.processed_frame = this_frame;
 	cpp_timers[set_timer_idx].used = 1;
