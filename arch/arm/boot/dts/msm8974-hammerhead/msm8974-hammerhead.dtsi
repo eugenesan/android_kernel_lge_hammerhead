@@ -403,6 +403,27 @@
 		qcom,pull = <0>;		/* QPNP_PIN_PULL_UP_30 */
 		qcom,vin-sel = <2>;		/* QPNP_PIN_VIN2 */
 		qcom,src-sel = <0>;		/* QPNP_PIN_SEL_FUNC_CONSTANT */
+	/*
+	 * GPIO 2 (KEY_UP) and GPIO 3 (KEY_DOWN) are the two volume keys,
+	 * and they need "master-en" -- the pin's digital path.
+	 *
+	 * The vendor's tree leaves it out for these two pins, and that is
+	 * the bug: the driver reads every pin's configuration out of the
+	 * PMIC's registers and only overrides what the device tree says,
+	 * so a pin with no "master-en" keeps whatever the PMIC happened
+	 * to be left with.  The PMIC's registers survive a warm reboot, so
+	 * a pin left with the master enable off stays dead for good -- the
+	 * pad cannot be read as an input, the key's interrupt never fires,
+	 * and the key does nothing at all.  Which of the two keys was dead
+	 * changed from boot to boot, because that is whichever pin the
+	 * PMIC had been left with.
+	 *
+	 * GPIO 1 (the earjack) has had "master-en" all along, which is why
+	 * it worked.
+	 *
+	 * See Entry 87 of airgap-standalone.log.md.
+	 */
+		qcom,master-en = <1>;
 	};
 
 	gpio@c200 { /* GPIO 3 */
@@ -411,6 +432,7 @@
 		qcom,pull = <0>;		/* QPNP_PIN_PULL_UP_30 */
 		qcom,vin-sel = <2>;		/* QPNP_PIN_VIN2 */
 		qcom,src-sel = <0>;		/* QPNP_PIN_SEL_FUNC_CONSTANT */
+		qcom,master-en = <1>;
 	};
 
 	gpio@c300 { /* GPIO 4 */
