@@ -16,6 +16,9 @@
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include <linux/firmware.h>
+#include <linux/fs.h>
+#include <linux/fcntl.h>
+#include <linux/vmalloc.h>
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/module.h>
@@ -763,6 +766,71 @@ static void cpp_release_hardware(struct cpp_device *cpp_dev)
 	msm_isp_deinit_bandwidth_mgr(ISP_CPP);
 }
 
+/*
+ * cpp_read_fw_file - read the camera's firmware blob from /lib/firmware
+ * @name: the file name (a path is accepted; only the base name is used)
+ *
+ * request_firmware() asks the user space helper for the blob, and the
+ * helper answers it from the device tree firmware region.  Under a
+ * recovery ramdisk there is no such region, so the blob that *is* in
+ * /lib/firmware is not found, and the CPP never starts ("Invalid frame
+ * message", and no frame ever arrives).  So read the file here.
+ */
+#define CPP_FW_MAX_SIZE	(64 * 1024)
+
+static void *cpp_read_fw_file(const char *name, size_t *size)
+{
+	struct file *filp;
+	const char *base;
+	char path[80];
+	void *buf;
+	loff_t pos = 0;
+	ssize_t got;
+
+	base = strrchr(name, '/');
+	base = base ? base + 1 : name;
+	if (!base || !*base)
+		return NULL;
+
+	snprintf(path, sizeof(path), "/lib/firmware/%s", base);
+
+	filp = filp_open(path, O_RDONLY, 0);
+	if (IS_ERR(filp)) {
+		pr_err("%s: cannot open %s (%ld)\n", __func__, path,
+			(long)PTR_ERR(filp));
+		return NULL;
+	}
+
+	/* the size: the blob is 16 KB, so give it room for the whole
+	 * thing (a page would truncate it) */
+	buf = vmalloc(CPP_FW_MAX_SIZE);
+	if (!buf) {
+		filp_close(filp, NULL);
+		return NULL;
+	}
+
+	while (pos < CPP_FW_MAX_SIZE) {
+		got = kernel_read(filp, pos, (char *)buf + pos,
+				  CPP_FW_MAX_SIZE - pos);
+		if (got <= 0)
+			break;
+		pos += got;
+	}
+	filp_close(filp, NULL);
+
+	if (!pos) {
+		vfree(buf);
+		return NULL;
+	}
+
+	*size = pos;
+	/* %u, not %zu: the kernel's vsnprintf does not know %zu and
+	 * reads the number as a string pointer (which faults). */
+	pr_err("%s: read %s (%u bytes) from %s\n", __func__, base,
+		(unsigned int)pos, path);
+	return buf;
+}
+
 static void cpp_load_fw(struct cpp_device *cpp_dev, char *fw_name_bin)
 {
 	uint32_t i;
@@ -770,6 +838,8 @@ static void cpp_load_fw(struct cpp_device *cpp_dev, char *fw_name_bin)
 	int32_t rc = -EFAULT;
 	const struct firmware *fw = NULL;
 	struct device *dev = &cpp_dev->pdev->dev;
+	void *own_buf = NULL;
+	size_t fw_size = 0;
 
 	msm_camera_io_w(0x1, cpp_dev->base + MSM_CPP_MICRO_CLKEN_CTL);
 	msm_camera_io_w(0x1, cpp_dev->base +
@@ -789,10 +859,26 @@ static void cpp_load_fw(struct cpp_device *cpp_dev, char *fw_name_bin)
 		 * oops the kernel here (the CALL_TRACE was
 		 * msm_camera_io_w+0x0, i.e. the NULL read of fw->size). */
 		if (fw == NULL) {
-			dev_err(dev, "%s: no firmware, giving up\n", __func__);
-			return;
+			/* request_firmware() hands the request to the user
+			 * space helper, and the helper is not always
+			 * able to answer it: the recovery's ueventd
+			 * only knows the device tree firmware region,
+			 * so under a recovery ramdisk the blob in
+			 * /lib/firmware is not found at all.  Read it
+			 * here instead -- the file is right there. */
+			size_t own_size = 0;
+
+			own_buf = cpp_read_fw_file(fw_name_bin, &own_size);
+			if (own_buf == NULL) {
+				dev_err(dev, "no firmware, giving up\n");
+				return;
+			}
+			ptr_bin = (uint32_t *)own_buf;
+			fw_size = own_size;
+		} else {
+			ptr_bin = (uint32_t *)fw->data;
+			fw_size = fw->size;
 		}
-		ptr_bin = (uint32_t *)fw->data;
 
 		msm_camera_io_w(0x1, cpp_dev->base +
 					 MSM_CPP_MICRO_BOOT_START);
@@ -802,17 +888,19 @@ static void cpp_load_fw(struct cpp_device *cpp_dev, char *fw_name_bin)
 
 		/*Start firmware loading*/
 		msm_cpp_write(MSM_CPP_CMD_FW_LOAD, cpp_dev->base);
-		msm_cpp_write(fw->size, cpp_dev->base);
+		msm_cpp_write(fw_size, cpp_dev->base);
 		msm_cpp_write(MSM_CPP_START_ADDRESS, cpp_dev->base);
 
 		if (ptr_bin) {
-			for (i = 0; i < fw->size/4; i++) {
+			for (i = 0; i < fw_size/4; i++) {
 				msm_cpp_write(*ptr_bin, cpp_dev->base);
 				ptr_bin++;
 			}
 		}
 		if (fw)
 			release_firmware(fw);
+		else
+			vfree(own_buf);
 		msm_cpp_poll(cpp_dev->base, MSM_CPP_MSG_ID_OK);
 		msm_cpp_poll(cpp_dev->base, MSM_CPP_MSG_ID_CMD);
 	}
