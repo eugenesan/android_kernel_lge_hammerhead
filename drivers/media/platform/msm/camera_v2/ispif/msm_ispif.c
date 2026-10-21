@@ -941,7 +941,17 @@ static long msm_ispif_cmd(struct v4l2_subdev *sd, void *arg)
 					ISPIF_VFE_m_PIX_INTF_n_CID_MASK(0, 0)),
 				msm_camera_io_r(ispif->base +
 					ISPIF_VFE_m_PIX_INTF_n_CROP(0, 0)));
-			for (k = 0; k < 24; k++)
+			/*
+			 * Only the registers that are implemented:
+			 * 0x240 to 0x28c.  The next ones (0x290 and up)
+			 * are the MISR registers, and *reading* a MISR
+			 * hangs the AHB -- the CPU stops, the kernel never
+			 * says anything again, and the watchdog restarts
+			 * the phone.  That is what a "crash in the
+			 * ISP-IF" looks like: no oops, no message, just
+			 * a phone that restarts itself.
+			 */
+			for (k = 0; k < 20; k++)
 				pr_err("DEBUG: ISPIF reg 0x%03x = 0x%08x\n",
 					0x240 + 4 * k,
 					msm_camera_io_r(ispif->base + 0x240 + 4 * k));
