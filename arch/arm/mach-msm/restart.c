@@ -289,8 +289,23 @@ static void msm_restart_prepare(const char *cmd)
 		lge_set_restart_reason(LAF_DLOAD_MODE);
 
 	if (in_panic) {
-		lge_set_panic_reason();
-
+		/*
+		 * A panic used to be reported to the bootloader with
+		 * LGE's "kernel error" magic (lge_set_panic_reason()).
+		 * The bootloader treats that magic as a fatal crash and
+		 * powers the phone off instead of restarting it, so a
+		 * crash left the device dead: the only way back was the
+		 * power key, and there was no way to read the panic.
+		 *
+		 * We want the opposite.  The reason written above
+		 * (0x77665501 -- the same one a normal restart writes)
+		 * is kept, so the bootloader starts the system again: the
+		 * device comes back on its own, into whatever is in the
+		 * boot partition, and the panic can be read out of the
+		 * persistent ram console (/proc/last_kmsg) on the next
+		 * boot.  The download mode is still cleared, so a panic
+		 * does not drop the phone into the bootloader.
+		 */
 		if (!lge_is_handle_panic_enable())
 			set_dload_mode(0);
 	}
