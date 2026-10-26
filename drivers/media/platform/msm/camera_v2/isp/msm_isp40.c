@@ -314,14 +314,20 @@ bus_scale_register_failed:
 
 static void msm_vfe40_release_hardware(struct vfe_device *vfe_dev)
 {
+	pr_err("DEBUG close: vfe release_hw entry\n");
 	free_irq(vfe_dev->vfe_irq->start, vfe_dev);
+	pr_err("DEBUG close: vfe irq freed\n");
 	tasklet_kill(&vfe_dev->vfe_tasklet);
+	pr_err("DEBUG close: vfe tasklet killed\n");
 	iounmap(vfe_dev->vfe_vbif_base);
 	iounmap(vfe_dev->vfe_base);
+	pr_err("DEBUG close: vfe unmapped\n");
 	msm_cam_clk_enable(&vfe_dev->pdev->dev, msm_vfe40_clk_info,
 		vfe_dev->vfe_clk, ARRAY_SIZE(msm_vfe40_clk_info), 0);
+	pr_err("DEBUG close: vfe clocks off\n");
 	regulator_disable(vfe_dev->fs_vfe);
 	msm_isp_deinit_bandwidth_mgr(ISP_VFE0 + vfe_dev->pdev->id);
+	pr_err("DEBUG close: vfe release_hw done\n");
 }
 
 static void msm_vfe40_init_hardware_reg(struct vfe_device *vfe_dev)
@@ -360,6 +366,27 @@ static void msm_vfe40_process_eof_irq(struct vfe_device *vfe_dev,
 		msm_isp_eof_notify(vfe_dev);
 }
 
+/* DEBUG: the VFE's registers when a frame ends, so that the port's
+ * configuration can be compared with the vendor's.  Only the
+ * registers that are not zero are printed, and only for the first
+ * few frames. */
+static void msm_vfe40_dump_regs(struct vfe_device *vfe_dev)
+{
+	char line[2048];
+	int n = 0;
+	uint32_t off;
+
+	n += scnprintf(line + n, sizeof(line) - n, "DEBUG: VFE regs:");
+	for (off = 0; off <= 0x320; off += 4) {
+		uint32_t v = msm_camera_io_r(vfe_dev->vfe_base + off);
+
+		if (v)
+			n += scnprintf(line + n, sizeof(line) - n,
+				       " %03x=%08x", off, v);
+	}
+	pr_err("%s\n", line);
+}
+
 static void msm_vfe40_process_camif_irq(struct vfe_device *vfe_dev,
 	uint32_t irq_status0, uint32_t irq_status1,
 	struct msm_isp_timestamp *ts)
@@ -369,8 +396,21 @@ static void msm_vfe40_process_camif_irq(struct vfe_device *vfe_dev,
 
 	if (irq_status0 & (1 << 0))
 		ISP_DBG("%s: SOF IRQ\n", __func__);
-	if (irq_status0 & (1 << 1))
+	if (irq_status0 & (1 << 1)) {
+		static int dumped;
+
 		ISP_DBG("%s: EOF IRQ\n", __func__);
+		if (dumped < 3) {
+			dumped++;
+			/* DEBUG: the register dump reads every register of the
+			 * VFE, MISR included, from the CAMIF's interrupt
+			 * handler -- and reading a MISR hangs the AHB.
+			 * That is what this dump was doing to the camera,
+			 * so it stays off until there is a way to read the
+			 * registers without the MISRs. */
+			// msm_vfe40_dump_regs(vfe_dev);
+		}
+	}
 	if (irq_status0 & (1 << 2))
 		ISP_DBG("%s: EPOCH0 IRQ\n", __func__);
 	if (irq_status0 & (1 << 3))
@@ -386,6 +426,8 @@ static void msm_vfe40_process_violation_status(
 
 	/* DEBUG: which check failed, and what the CAMIF was told */
 	pr_err("DEBUG: camif violation status 0x%08x\n", violation_status);
+	pr_err("DEBUG: camif violation reg 0x48 = 0x%08x\n",
+		msm_camera_io_r(vfe_dev->vfe_base + 0x48));
 	pr_err("DEBUG: camif regs: 0x1C 0x%08x 0x2E8 0x%08x 0x2F4 0x%08x 0x300 0x%08x 0x304 0x%08x 0x308 0x%08x 0x314 0x%08x 0x31C 0x%08x\n",
 		msm_camera_io_r(vfe_dev->vfe_base + 0x1C),
 		msm_camera_io_r(vfe_dev->vfe_base + 0x2E8),

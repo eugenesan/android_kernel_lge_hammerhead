@@ -738,9 +738,16 @@ static int msm_close(struct file *filep)
 	struct msm_sd_subdev *msm_sd;
 
 	/*stop all hardware blocks immediately*/
+	pr_err("DEBUG close: msm_close entry\n");
 	if (!list_empty(&msm_v4l2_dev->subdevs))
-		list_for_each_entry(msm_sd, &ordered_sd_list, list)
+		list_for_each_entry(msm_sd, &ordered_sd_list, list) {
+			pr_err("DEBUG close: shutting down %s\n",
+				msm_sd->sd.name);
 			__msm_sd_close_subdevs(msm_sd, &sd_close);
+			pr_err("DEBUG close: shut down %s\n",
+				msm_sd->sd.name);
+		}
+	pr_err("DEBUG close: the subdevs are down\n");
 
 	/* send v4l2_event to HAL next*/
 	msm_queue_traverse_action(msm_session_q, struct msm_session, list,
@@ -749,6 +756,7 @@ static int msm_close(struct file *filep)
 	spin_lock_irqsave(&msm_eventq_lock, flags);
 	msm_eventq = NULL;
 	spin_unlock_irqrestore(&msm_eventq_lock, flags);
+	pr_err("DEBUG close: the sessions are gone\n");
 	v4l2_fh_release(filep);
 
 	spin_lock_irqsave(&msm_pid_lock, flags);
@@ -758,6 +766,7 @@ static int msm_close(struct file *filep)
 
 	atomic_set(&pvdev->opened, 0);
 
+	pr_err("DEBUG close: msm_close done\n");
 	return rc;
 }
 

@@ -326,6 +326,15 @@ static int camera_v4l2_s_fmt_vid_cap_mplane(struct file *filep, void *fh,
 			sizeof(struct msm_v4l2_format_data));
 		user_fmt = (struct msm_v4l2_format_data *)sp->vb2_q.drv_priv;
 
+		/* DEBUG: the output geometry the camera HAL asks for.  It
+		 * has to match what the CAMIF produces (or be larger):
+		 * if the ISP has nowhere to put the pixels, the frame
+		 * that comes out is empty. */
+		pr_err("DEBUG: the format: %ux%u fourcc %08x, %u planes: %u %u %u\n",
+			user_fmt->width, user_fmt->height, user_fmt->pixelformat,
+			user_fmt->num_planes, user_fmt->plane_sizes[0],
+			user_fmt->plane_sizes[1], user_fmt->plane_sizes[2]);
+
 		pr_debug("%s: num planes :%c\n", __func__,
 					user_fmt->num_planes);
 		/*num_planes need to bound checked, otherwise for loop

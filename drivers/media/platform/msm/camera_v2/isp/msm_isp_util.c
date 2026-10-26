@@ -16,6 +16,7 @@
 #include <linux/io.h>
 #include <media/v4l2-subdev.h>
 #include <linux/ratelimit.h>
+#include <linux/fs_struct.h>
 
 #include "msm.h"
 #include "msm_isp_util.h"
@@ -363,6 +364,35 @@ long msm_isp_ioctl(struct v4l2_subdev *sd,
 		break;
 	}
 	case VIDIOC_MSM_ISP_REQUEST_STREAM:
+		/* DEBUG: capture the stream configuration the camera HAL
+		 * asks for.  The output geometry has to match what the
+		 * CAMIF produces, or the ISP has nowhere to put the
+		 * pixels -- and that is what an empty frame looks
+		 * like. */
+		{
+			static u32 dump_idx;
+			char path[80];
+			struct file *f;
+			loff_t pos = 0;
+			const struct cred *old_cred;
+			struct msm_vfe_axi_stream_request_cmd *cmd =
+				(void __user *)arg;
+
+			snprintf(path, sizeof(path),
+				"/data/local/tmp/isp_stream_%u.bin", dump_idx++);
+			old_cred = override_creds(&init_cred);
+			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			if (IS_ERR(f)) {
+				pr_err("DEBUG: capture failed: %s\n", path);
+			} else {
+				vfs_write(f, (const char __user *)arg,
+					sizeof(*cmd), &pos);
+				filp_close(f, NULL);
+				pr_err("DEBUG: captured %s (the stream request)\n",
+					path);
+			}
+			revert_creds(old_cred);
+		}
 		mutex_lock(&vfe_dev->core_mutex);
 		rc = msm_isp_request_axi_stream(vfe_dev, arg);
 		mutex_unlock(&vfe_dev->core_mutex);
@@ -744,7 +774,17 @@ int msm_isp_proc_cmd(struct vfe_device *vfe_dev, void *arg)
 		/* the camera daemon is not allowed to create files in
 		 * /data/local/tmp -- do it as root */
 		old_cred = override_creds(&init_cred);
-		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+		/* the umask of the camera daemon (006) would take the
+		 * other users' read bit away, and then the shell
+		 * cannot read the file; the umask is applied when the
+		 * file is created, so it is enough to lift it here */
+		{
+			mode_t old_umask = current->fs->umask;
+
+			current->fs->umask = 0;
+			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			current->fs->umask = old_umask;
+		}
 		if (IS_ERR(f)) {
 			pr_err("DEBUG: capture failed: %s (%d)\n",
 				path, (int)PTR_ERR(f));
@@ -950,6 +990,29 @@ irqreturn_t msm_isp_process_irq(int irq_num, void *data)
 	uint32_t irq_status0, irq_status1;
 	uint32_t error_mask0, error_mask1;
 
+	/*
+	 * DEBUG: the VFE's registers, so that the port's configuration
+	 * can be compared with the vendor's.
+	 *
+	 * This is OFF, and it must stay off.  The dump reads the whole
+	 * VFE register range (0x000 to 0x320) from the *interrupt
+	 * handler*, and the VFE's register map is not what it looks
+	 * like: some of the offsets in that range are not ordinary
+	 * registers, and reading them from the IRQ handler is how the
+	 * camera stops.  (The same thing happened in the ISP-IF, whose
+	 * MISR registers at 0x290 and up hang the AHB: the CPU stops,
+	 * the kernel prints nothing more, and the watchdog restarts the
+	 * phone.)
+	 *
+	 * The registers are read with msm_camera_io_r() *in the
+	 * interrupt handler* -- i.e. while the hardware may be writing
+	 * them -- and the whole 0x320 range includes offsets this
+	 * driver never touches.
+	 *
+	 * If a register dump is needed, do it from the process context
+	 * (a debug ioctl), not from here.
+	 */
+
 	vfe_dev->hw_info->vfe_ops.irq_ops.
 		read_irq_status(vfe_dev, &irq_status0, &irq_status1);
 	vfe_dev->hw_info->vfe_ops.core_ops.
@@ -1109,6 +1172,8 @@ int msm_isp_close_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	long rc;
 	struct vfe_device *vfe_dev = v4l2_get_subdevdata(sd);
 	ISP_DBG("%s\n", __func__);
+	pr_err("DEBUG close: isp close in %s/%d, pending sig %d\n",
+		current->comm, current->pid, signal_pending(current));
 	mutex_lock(&vfe_dev->realtime_mutex);
 	mutex_lock(&vfe_dev->core_mutex);
 	if (vfe_dev->vfe_open_cnt == 0) {
@@ -1119,6 +1184,8 @@ int msm_isp_close_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	}
 
 	rc = vfe_dev->hw_info->vfe_ops.axi_ops.halt(vfe_dev);
+	pr_err("DEBUG close: isp halt rc %ld, pending sig %d\n",
+		rc, signal_pending(current));
 	if (rc <= 0)
 		pr_err("%s: halt timeout rc=%ld\n", __func__, rc);
 

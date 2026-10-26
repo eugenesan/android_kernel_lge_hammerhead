@@ -16,6 +16,9 @@
 #include <linux/irqreturn.h>
 #include <linux/fs.h>
 #include <linux/cred.h>
+#include <linux/highmem.h>
+#include <linux/uaccess.h>
+#include <linux/fs_struct.h>
 #include <linux/init_task.h>
 #include "msm_csid.h"
 #include "msm_csid_hwreg.h"
@@ -375,6 +378,7 @@ static int msm_csid_release(struct csid_device *csid_dev)
 {
 	uint32_t irq;
 
+	pr_err("DEBUG close: csid%u release entry\n", csid_dev->pdev->id);
 	/* DEBUG: the VC LUT the camera HAL's configuration produced */
 	if (csid_dev->base) {
 		pr_err("DEBUG: CSID%u LUT: vc0 0x%08x vc1 0x%08x vc2 0x%08x vc3 0x%08x, cfg0 0x%08x cfg1 0x%08x\n",
@@ -387,23 +391,88 @@ static int msm_csid_release(struct csid_device *csid_dev)
 			msm_camera_io_r(csid_dev->base + CSID_CID_n_CFG_ADDR + 4));
 	}
 
-	/* DEBUG: how much data ever reached this receiver, and why was
-	 * it not mapped? */
+	pr_err("DEBUG close: csid%u LUT read done\n", csid_dev->pdev->id);
+
+	/*
+	 * DEBUG: how much data ever reached this receiver, and why was
+	 * it not mapped?
+	 *
+	 * These are ordinary counter registers, and each is read ONCE.
+	 *
+	 * The captured-packet registers (0x6c, 0x70, 0x74 -- unmapped
+	 * long, mapped long, short) are NOT read: they are a diagnostic
+	 * FIFO, and a read of one when the FIFO is empty hangs the AHB.
+	 * The CPU stops, the kernel prints nothing more, and the watchdog
+	 * resets the phone.  That is exactly what this close path used to
+	 * do, and it is why every camera test ended in a reboot.
+	 */
 	if (csid_dev->base) {
-		pr_err("DEBUG: CSID%u irq status 0x%08x, packets %u, unmapped long 0x%08x, mapped long 0x%08x, short 0x%08x, ecc %u, crc %u\n",
-			csid_dev->pdev->id,
-			msm_camera_io_r(csid_dev->base + CSID_IRQ_STATUS_ADDR),
-			msm_camera_io_r(csid_dev->base +
-				CSID_STATS_TOTAL_PKTS_RCVD_ADDR),
-			msm_camera_io_r(csid_dev->base +
-				CSID_CAPTURED_UNMAPPED_LONG_PKT_HDR_ADDR),
-			msm_camera_io_r(csid_dev->base +
-				CSID_CAPTURED_MMAPPED_LONG_PKT_HDR_ADDR),
-			msm_camera_io_r(csid_dev->base +
-				CSID_CAPTURED_SHORT_PKT_ADDR),
-			msm_camera_io_r(csid_dev->base + CSID_STATS_ECC_ADDR),
-			msm_camera_io_r(csid_dev->base + CSID_STATS_CRC_ADDR));
+		uint32_t v_irq, v_pkts, v_ecc, v_crc;
+		char buf[200];
+		int n;
+
+		v_irq = msm_camera_io_r(csid_dev->base +
+			CSID_IRQ_STATUS_ADDR);
+		v_pkts = msm_camera_io_r(csid_dev->base +
+			CSID_STATS_TOTAL_PKTS_RCVD_ADDR);
+		v_ecc = msm_camera_io_r(csid_dev->base +
+			CSID_STATS_ECC_ADDR);
+		v_crc = msm_camera_io_r(csid_dev->base +
+			CSID_STATS_CRC_ADDR);
+
+		pr_err("DEBUG: CSID%u irq status 0x%08x, packets %u, ecc %u, crc %u\n",
+			csid_dev->pdev->id, v_irq, v_pkts, v_ecc, v_crc);
+
+		n = snprintf(buf, sizeof(buf),
+			"CSID%u irq status 0x%08x, packets %u, ecc %u, crc %u\n",
+			csid_dev->pdev->id, v_irq, v_pkts, v_ecc, v_crc);
+
+		/*
+		 * The text is in kernel memory, and vfs_write() copies with
+		 * copy_from_user(), which on this ARM kernel only reaches
+		 * addresses below TASK_SIZE -- a kernel direct-map address
+		 * is rejected by access_ok() and nothing is written.  That
+		 * is why the file used to come out empty.  get_fs() /
+		 * set_fs(KERNEL_DS) lifts the limit for the write.
+		 */
+		{
+			mm_segment_t old_fs;
+			const struct cred *old_cred;
+			mode_t old_umask;
+			struct file *f;
+			loff_t pos = 0;
+
+			/* the camera daemon may not create files in
+			 * /data/local/tmp -- do it as root; and its umask
+			 * would take the read bit away, so lift it while
+			 * the file is made */
+			old_cred = override_creds(&init_cred);
+			old_umask = current->fs->umask;
+			current->fs->umask = 0;
+			f = filp_open("/data/local/tmp/csid_state.txt",
+				O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			current->fs->umask = old_umask;
+			if (!IS_ERR(f)) {
+				int w;
+
+				old_fs = get_fs();
+				set_fs(KERNEL_DS);
+				pos = 0;
+				w = vfs_write(f, buf, n, &pos);
+				set_fs(old_fs);
+				pr_err("DEBUG: csid%u state file: vfs_write %d of %d, mode %o, uid %d\n",
+					csid_dev->pdev->id, w, n,
+					f->f_path.dentry->d_inode->i_mode,
+					f->f_path.dentry->d_inode->i_uid);
+				filp_close(f, NULL);
+			} else {
+				pr_err("DEBUG: csid%u state file: %ld\n",
+					csid_dev->pdev->id, PTR_ERR(f));
+			}
+			revert_creds(old_cred);
+		}
 	}
+	pr_err("DEBUG close: csid%u stats read done\n", csid_dev->pdev->id);
 
 	if (csid_dev->csid_state != CSID_POWER_UP) {
 		pr_err("%s: csid invalid state %d\n", __func__,
@@ -411,11 +480,14 @@ static int msm_csid_release(struct csid_device *csid_dev)
 		return -EINVAL;
 	}
 
+	pr_err("DEBUG close: csid%u clearing its irq\n", csid_dev->pdev->id);
 	irq = msm_camera_io_r(csid_dev->base + CSID_IRQ_STATUS_ADDR);
 	msm_camera_io_w(irq, csid_dev->base + CSID_IRQ_CLEAR_CMD_ADDR);
 	msm_camera_io_w(0, csid_dev->base + CSID_IRQ_MASK_ADDR);
 
+	pr_err("DEBUG close: csid%u disabling its irq\n", csid_dev->pdev->id);
 	disable_irq(csid_dev->irq->start);
+	pr_err("DEBUG close: csid%u irq disabled\n", csid_dev->pdev->id);
 
 	if (csid_dev->hw_version == CSID_VERSION_V20) {
 		msm_cam_clk_enable(&csid_dev->pdev->dev, csid_8960_clk_info,
@@ -454,9 +526,11 @@ static int msm_csid_release(struct csid_device *csid_dev)
 			NULL, 0, &csid_dev->csi_vdd, 0);
 	}
 
+	pr_err("DEBUG close: csid%u clocks off\n", csid_dev->pdev->id);
 	iounmap(csid_dev->base);
 	csid_dev->base = NULL;
 	csid_dev->csid_state = CSID_POWER_DOWN;
+	pr_err("DEBUG close: csid%u release done\n", csid_dev->pdev->id);
 	return 0;
 }
 
@@ -575,7 +649,11 @@ static long msm_csid_subdev_ioctl(struct v4l2_subdev *sd,
 {
 	int rc = -ENOIOCTLCMD;
 	struct csid_device *csid_dev = v4l2_get_subdevdata(sd);
+	pr_err("DEBUG close: csid%u ioctl %x entry\n",
+		csid_dev->pdev->id, cmd);
 	mutex_lock(&csid_dev->mutex);
+	pr_err("DEBUG close: csid%u ioctl %x has the mutex\n",
+		csid_dev->pdev->id, cmd);
 	CDBG("%s:%d id %d\n", __func__, __LINE__, csid_dev->pdev->id);
 	switch (cmd) {
 	case VIDIOC_MSM_SENSOR_GET_SUBDEV_ID:

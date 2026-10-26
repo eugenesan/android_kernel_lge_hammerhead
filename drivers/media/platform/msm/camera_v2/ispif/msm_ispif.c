@@ -15,6 +15,8 @@
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/cred.h>
+#include <linux/highmem.h>
+#include <linux/fs_struct.h>
 #include <linux/init_task.h>
 #include <linux/jiffies.h>
 #include <linux/of.h>
@@ -390,6 +392,90 @@ static int msm_ispif_config(struct ispif_device *ispif,
 		rc = -EINVAL;
 		return rc;
 	}
+
+	/*
+	 * DEBUG: what the camera HAL asked for, in a file.
+	 *
+	 * The print goes to the kernel's log, and the kernel's log is
+	 * lost when the camera's close path panics -- the ISP's close
+	 * hangs, init dies, and the watchdog resets the phone.  The file
+	 * survives the restart.
+	 *
+	 * Two things matter here, and both cost a crash to learn:
+	 *
+	 *  - filp_open() returns an ERR_PTR, not NULL: the test for
+	 *    success is IS_ERR(), not "if (f)".
+	 *  - vfs_write() copies with copy_from_user(), and on this ARM
+	 *    kernel that only reaches addresses below TASK_SIZE.  The
+	 *    stack and this tree's static data are *not* below it, so
+	 *    text that the kernel made cannot be written out this way.
+	 *    It has to be put in a page the copy can read.
+	 */
+	{
+		struct file *f;
+		loff_t pos = 0;
+		char buf[512];
+		struct page *pg;
+		void *kaddr;
+		int n = 0;
+
+		n += snprintf(buf + n, sizeof(buf) - n,
+			"ISP-IF SET_VFE_INFO: num_vfe %d, id %d, ver %d, max_res %d\n",
+			ispif->vfe_info.num_vfe,
+			ispif->vfe_info.num_vfe > 0 ?
+				ispif->vfe_info.info[0].id : -1,
+			ispif->vfe_info.num_vfe > 0 ?
+				ispif->vfe_info.info[0].ver : -1,
+			ispif->vfe_info.num_vfe > 0 ?
+				ispif->vfe_info.info[0].max_resolution : -1);
+		for (i = 0; i < params->num && i < 4; i++)
+			n += snprintf(buf + n, sizeof(buf) - n,
+				"ISP-IF routing %d: vfe_intf %d intftype %d num_cids %d cid0 %d cid1 %d csid %d crop %d (%d..%d)\n",
+				i, params->entries[i].vfe_intf,
+				params->entries[i].intftype,
+				params->entries[i].num_cids,
+				params->entries[i].cids[0],
+				params->entries[i].cids[1],
+				params->entries[i].csid,
+				params->entries[i].crop_enable,
+				params->entries[i].crop_start_pixel,
+				params->entries[i].crop_end_pixel);
+
+		pg = alloc_page(GFP_KERNEL);
+		if (!pg)
+			return -ENOMEM;
+		kaddr = kmap(pg);
+		if (!kaddr) {
+			__free_page(pg);
+			return -ENOMEM;
+		}
+		memcpy(kaddr, buf, n);
+		kunmap(kaddr);
+
+		{
+			/* the camera daemon is not allowed to create files
+			 * in /data/local/tmp -- do it as root; and its
+			 * umask (006) would take the other users' read
+			 * bit away, so the shell could not read it */
+			const struct cred *old_cred = override_creds(&init_cred);
+			mode_t old_umask = current->fs->umask;
+
+			current->fs->umask = 0;
+			f = filp_open("/data/local/tmp/ispif_state.txt",
+				O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			current->fs->umask = old_umask;
+			if (IS_ERR(f)) {
+				pr_err("DEBUG: the ISP-IF's state file: %d\n",
+					(int)PTR_ERR(f));
+			} else {
+				vfs_write(f, kaddr, n, &pos);
+				filp_close(f, NULL);
+			}
+			revert_creds(old_cred);
+		}
+		__free_page(pg);
+	}
+
 
 	/* DEBUG: what routing did the camera HAL ask for? */
 	for (i = 0; i < params->num && i < 4; i++) {
@@ -887,6 +973,7 @@ static void msm_ispif_release(struct ispif_device *ispif)
 {
 	BUG_ON(!ispif);
 
+	pr_err("DEBUG close: ispif release entry\n");
 	if (ispif->ispif_state != ISPIF_POWER_UP) {
 		pr_err("%s: ispif invalid state %d\n", __func__,
 			ispif->ispif_state);
@@ -895,16 +982,21 @@ static void msm_ispif_release(struct ispif_device *ispif)
 
 	/* make sure no streaming going on */
 	msm_ispif_reset(ispif);
+	pr_err("DEBUG close: ispif reset done\n");
 
 	msm_ispif_clk_ahb_enable(ispif, 0);
+	pr_err("DEBUG close: ispif ahb clock off\n");
 
 	free_irq(ispif->irq->start, ispif);
+	pr_err("DEBUG close: ispif irq freed\n");
 
 	iounmap(ispif->base);
+	pr_err("DEBUG close: ispif unmapped\n");
 
 	iounmap(ispif->clk_mux_base);
 
 	ispif->ispif_state = ISPIF_POWER_DOWN;
+	pr_err("DEBUG close: ispif release done\n");
 }
 
 static long msm_ispif_cmd(struct v4l2_subdev *sd, void *arg)
@@ -918,6 +1010,29 @@ static long msm_ispif_cmd(struct v4l2_subdev *sd, void *arg)
 	BUG_ON(!pcdata);
 
 	mutex_lock(&ispif->mutex);
+	/*
+	 * DEBUG: every ioctl the camera HAL sends to the ISP-IF, in a
+	 * file (the print goes to the kernel's log, and the kernel log
+	 * is lost when the camera's close path panics).
+	 */
+	{
+		struct file *f;
+		loff_t pos = 0;
+		char buf[200];
+		int n;
+		const struct cred *old_cred = override_creds(&init_cred);
+
+		n = snprintf(buf, sizeof(buf),
+			"ISP-IF ioctl: cfg_type %d, the state %d\n",
+			pcdata->cfg_type, ispif->ispif_state);
+		f = filp_open("/data/local/tmp/ispif_ioctls.txt",
+			O_WRONLY | O_CREAT | O_APPEND, 0666);
+		if (!IS_ERR(f)) {
+			vfs_write(f, buf, n, &pos);
+			filp_close(f, NULL);
+		}
+		revert_creds(old_cred);
+	}
 	switch (pcdata->cfg_type) {
 	case ISPIF_ENABLE_REG_DUMP:
 		ispif->enb_dump_reg = pcdata->reg_dump; /* save dump config */

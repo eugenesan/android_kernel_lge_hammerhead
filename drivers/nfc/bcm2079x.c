@@ -233,6 +233,23 @@ static ssize_t bcm2079x_dev_read(struct file *filp, char __user *buf,
 
 	mutex_unlock(&bcm2079x_dev->read_mutex);
 
+	/* DEBUG: the whole NCI conversation, so that the port can be
+	 * written against what the vendor's HAL actually says to the
+	 * chip (bring-up, configuration, discovery, activation).
+	 * One line per packet: the kernel interleaves separate
+	 * printks with other messages, so the whole packet has to go
+	 * out in one call. */
+	if (total > 0) {
+		char hex[600];
+		int i, n = 0;
+
+		for (i = 0; i < total && n < (int)sizeof(hex) - 4; i++)
+			n += scnprintf(hex + n, sizeof(hex) - n, " %02x",
+				       (unsigned char)tmp[i]);
+		hex[n] = 0;
+		pr_err("DEBUG: NFC RX %d:%s\n", total, hex);
+	}
+
 	if (total > count || copy_to_user(buf, tmp, total)) {
 		dev_err(&bcm2079x_dev->client->dev,
 			"failed to copy to user space, total = %d\n", total);
@@ -274,6 +291,18 @@ static ssize_t bcm2079x_dev_write(struct file *filp, const char __user *buf,
 	}
 	mutex_unlock(&bcm2079x_dev->read_mutex);
 
+	/* DEBUG: what the HAL said to the chip */
+	{
+		char hex[600];
+		int i, n = 0;
+
+		for (i = 0; i < count && n < (int)sizeof(hex) - 4; i++)
+			n += scnprintf(hex + n, sizeof(hex) - n, " %02x",
+				       (unsigned char)tmp[i]);
+		hex[n] = 0;
+		pr_err("DEBUG: NFC TX %d:%s\n", count, hex);
+	}
+
 	return ret;
 }
 
@@ -297,6 +326,10 @@ static long bcm2079x_dev_unlocked_ioctl(struct file *filp,
 					 unsigned int cmd, unsigned long arg)
 {
 	struct bcm2079x_dev *bcm2079x_dev = filp->private_data;
+
+	/* DEBUG: the power and wake lines, so that the port can be
+	 * written against what the vendor's HAL does with them. */
+	pr_err("DEBUG: NFC IOCTL 0x%02x arg %lu\n", cmd, arg);
 
 	switch (cmd) {
 	case BCMNFC_READ_FULL_PACKET:

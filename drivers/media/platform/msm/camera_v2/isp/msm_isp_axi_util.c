@@ -827,6 +827,8 @@ static void msm_isp_process_done_buf(struct vfe_device *vfe_dev,
 					&buf_event);
 			}
 		} else {
+			pr_err("DEBUG: isp buf_done stream %d buf %d frame %d ts %llu\n",
+				stream_info->stream_id, buf->buf_idx, frame_id, ts->buf_time);
 			vfe_dev->buf_mgr->ops->buf_done(vfe_dev->buf_mgr,
 				buf->bufq_handle, buf->buf_idx,
 				&ts->buf_time, frame_id);

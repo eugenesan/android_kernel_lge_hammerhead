@@ -22,6 +22,7 @@
 #include <linux/fs.h>
 #include <linux/cred.h>
 #include <linux/init_task.h>
+#include <linux/fs_struct.h>
 #ifdef CONFIG_IMX179
 #include "msm_eeprom.h"
 #endif
@@ -1420,7 +1421,19 @@ static void msm_sensor_capture_cfg(int cfgtype, void *cfg, unsigned int size)
 		"/data/local/tmp/sensorio_%u_t%d_s%u.bin",
 		dump_idx++, cfgtype, size);
 	old_cred = override_creds(&init_cred);
-	f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+	/*
+	 * The umask of the camera daemon (006) would take the other
+	 * users' read bit away again, and then the shell cannot read
+	 * the file.  The umask is applied when the file is created, so
+	 * it is enough to lift it for the moment.
+	 */
+	{
+		mode_t old_umask = current->fs->umask;
+
+		current->fs->umask = 0;
+		f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+		current->fs->umask = old_umask;
+	}
 	if (!IS_ERR(f)) {
 		int w = vfs_write(f, (const char __user *)cfg, size, &pos);
 		filp_close(f, NULL);
@@ -1586,7 +1599,14 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 				"/data/local/tmp/sensor_cfg_%u_n%d.bin",
 				dump_idx++, conf_array.size);
 			old_cred = override_creds(&init_cred);
-			f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			{
+				mode_t old_umask = current->fs->umask;
+
+				current->fs->umask = 0;
+				f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC,
+					      0666);
+				current->fs->umask = old_umask;
+			}
 			if (!IS_ERR(f)) {
 				int w = vfs_write(f,
 					(const char __user *)conf_array.reg_setting,
