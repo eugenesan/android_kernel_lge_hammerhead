@@ -462,10 +462,25 @@ static int msm_isp_send_hw_cmd(struct vfe_device *vfe_dev,
 	case VFE_READ_DMI_64BIT: {
 		if (reg_cfg_cmd->cmd_type == VFE_WRITE_DMI_64BIT ||
 			reg_cfg_cmd->cmd_type == VFE_READ_DMI_64BIT) {
-			if ((reg_cfg_cmd->u.dmi_info.hi_tbl_offset <=
-				reg_cfg_cmd->u.dmi_info.lo_tbl_offset) ||
-				(reg_cfg_cmd->u.dmi_info.hi_tbl_offset -
-				reg_cfg_cmd->u.dmi_info.lo_tbl_offset !=
+			/*
+			 * The camera2 HAL puts the *low* half of a 64-bit DMI
+			 * entry after the high half (lo = hi + 4), which is
+			 * the opposite of what this check insists on.  With
+			 * the check as it was, the vendor's own configuration
+			 * was rejected with EINVAL ("hi %d lo %d") and the
+			 * ISP never got its tables -- the camera could be
+			 * opened, configured and streamed, but no frame ever
+			 * came out of it.
+			 *
+			 * Accept either order.  (The table the HAL sends
+			 * here is all zeros, so which half is which does
+			 * not matter for it.)
+			 */
+			if ((reg_cfg_cmd->u.dmi_info.hi_tbl_offset !=
+				reg_cfg_cmd->u.dmi_info.lo_tbl_offset +
+				(sizeof(uint32_t))) &&
+			    (reg_cfg_cmd->u.dmi_info.lo_tbl_offset !=
+				reg_cfg_cmd->u.dmi_info.hi_tbl_offset +
 				(sizeof(uint32_t)))) {
 				pr_err("%s:%d hi %d lo %d\n",
 					__func__, __LINE__,
