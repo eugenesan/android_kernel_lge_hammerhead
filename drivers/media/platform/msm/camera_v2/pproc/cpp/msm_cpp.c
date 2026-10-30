@@ -84,7 +84,7 @@ static int del_timer_idx;
 static int set_timer_idx;
 
 /* dump the frame command before writing to the hardware */
-#define  MSM_CPP_DUMP_FRM_CMD 1
+#define  MSM_CPP_DUMP_FRM_CMD 0
 
 #if CONFIG_MSM_CPP_DBG
 #define CPP_DBG(fmt, args...) pr_err(fmt, ##args)
@@ -1150,8 +1150,6 @@ static int msm_cpp_dump_frame_cmd(uint32_t *cmd, int32_t len)
 
 void msm_cpp_do_timeout_work(struct work_struct *work)
 {
-	int ret;
-	uint32_t i = 0;
 	struct msm_cpp_frame_info_t *this_frame =
 		cpp_timers[del_timer_idx].data.processed_frame;
 	struct msm_cpp_frame_info_t *second_frame = NULL;
@@ -1191,57 +1189,17 @@ void msm_cpp_do_timeout_work(struct work_struct *work)
 	 * which takes the whole kernel down.  The frame is already
 	 * lost by then, so the reload buys nothing here: log it and
 	 * leave the hardware alone. */
-	pr_err("the frame timed out; not reloading the firmware\n");
-	disable_irq(expired_dev->irq->start);
-	enable_irq(expired_dev->irq->start);
-
-	cpp_timers[set_timer_idx].data.processed_frame = this_frame;
-	cpp_timers[set_timer_idx].used = 1;
-	pr_err("ReInstalling cpp_timer %d\n", set_timer_idx);
-	setup_timer(&cpp_timers[set_timer_idx].cpp_timer, cpp_timer_callback,
-		(unsigned long)&cpp_timers[0]);
-	pr_err("Starting timer to fire in %d ms. (jiffies=%lu)\n",
-		CPP_CMD_TIMEOUT_MS, jiffies);
-	ret = mod_timer(&cpp_timers[set_timer_idx].cpp_timer,
-		jiffies + msecs_to_jiffies(CPP_CMD_TIMEOUT_MS));
-	if (ret)
-		pr_err("error in mod_timer\n");
-
-	set_timer_idx = 1 - set_timer_idx;
-	pr_err("Rescheduling for identity=0x%x, frame_id=%03d",
-		this_frame->identity, this_frame->frame_id);
-	msm_cpp_write(0x6, cpp_timers[set_timer_idx].data.cpp_dev->base);
-	msm_cpp_dump_frame_cmd(this_frame->cpp_cmd_msg,
-		this_frame->msg_len);
-	for (i = 0; i < this_frame->msg_len; i++)
-		msm_cpp_write(this_frame->cpp_cmd_msg[i],
-			cpp_timers[set_timer_idx].data.cpp_dev->base);
-
-
-	if (second_frame != NULL) {
-		cpp_timers[set_timer_idx].data.processed_frame = second_frame;
-		cpp_timers[set_timer_idx].used = 1;
-		pr_err("ReInstalling cpp_timer %d\n", set_timer_idx);
-		setup_timer(&cpp_timers[set_timer_idx].cpp_timer,
-			cpp_timer_callback, (unsigned long)&cpp_timers[0]);
-		pr_err("Starting timer to fire in %d ms. (jiffies=%lu)\n",
-			CPP_CMD_TIMEOUT_MS, jiffies);
-		ret = mod_timer(&cpp_timers[set_timer_idx].cpp_timer,
-			jiffies + msecs_to_jiffies(CPP_CMD_TIMEOUT_MS));
-		if (ret)
-			pr_err("error in mod_timer\n");
-
-		set_timer_idx = 1 - set_timer_idx;
-		pr_err("Rescheduling for identity=0x%x, frame_id=%03d",
-			second_frame->identity, second_frame->frame_id);
-		msm_cpp_write(0x6,
-			cpp_timers[set_timer_idx].data.cpp_dev->base);
-		msm_cpp_dump_frame_cmd(second_frame->cpp_cmd_msg,
-			second_frame->msg_len);
-		for (i = 0; i < second_frame->msg_len; i++)
-			msm_cpp_write(second_frame->cpp_cmd_msg[i],
-				cpp_timers[set_timer_idx].data.cpp_dev->base);
-	}
+	pr_err("the frame timed out; dropping it (no hardware reload)\n");
+	/*
+	 * The vendor reload/resend path writes to the CPP from this workqueue.
+	 * On this device that write is not accessible from the workqueue and
+	 * takes the whole kernel down (the panic lands in
+	 * msm_isp_process_stats_irq).  The frame is already lost, so do not
+	 * touch the hardware and do not re-arm the timer.  A timed-out frame
+	 * now stalls that frame instead of resetting the device.
+	 */
+	(void)second_frame;
+	return;
 }
 
 void cpp_timer_callback(unsigned long data)
