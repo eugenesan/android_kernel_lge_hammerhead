@@ -78,6 +78,15 @@ void msm_isp_process_stats_irq(struct vfe_device *vfe_dev,
 	uint32_t pingpong_status;
 	uint32_t comp_stats_type_mask = 0;
 	uint32_t stats_comp_mask = 0, stats_irq_mask = 0;
+	/* The CAMIF_RAW path never requests stats streams.  If the stats IRQ
+	 * still fires after a CPP timeout, do not run the stats machinery on
+	 * an unconfigured/expired stream. */
+	if (!vfe_dev || !vfe_dev->hw_info ||
+	    !vfe_dev->hw_info->stats_hw_info)
+		return;
+	if (!vfe_dev->hw_info->vfe_ops.stats_ops.get_comp_mask ||
+	    !vfe_dev->hw_info->vfe_ops.stats_ops.get_wm_mask)
+		return;
 	stats_comp_mask = vfe_dev->hw_info->vfe_ops.stats_ops.
 		get_comp_mask(irq_status0, irq_status1);
 	stats_irq_mask = vfe_dev->hw_info->vfe_ops.stats_ops.
