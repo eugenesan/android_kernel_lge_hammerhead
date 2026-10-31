@@ -717,10 +717,22 @@ int msm_isp_proc_cmd(struct vfe_device *vfe_dev, void *arg)
 		struct msm_vfe_axi_stream *stream =
 			&vfe_dev->axi_data.stream_info[i];
 		if (stream->y_only &&
-		    (stream->state == STARTING || stream->state == ACTIVE) &&
-		    vfe_dev->hw_info->vfe_ops.axi_ops.cfg_comp_mask)
-			vfe_dev->hw_info->vfe_ops.axi_ops.cfg_comp_mask(
-				vfe_dev, stream);
+		    (stream->state == STARTING || stream->state == ACTIVE)) {
+			uint32_t irq_mask1;
+			if (vfe_dev->hw_info->vfe_ops.axi_ops.cfg_comp_mask)
+				vfe_dev->hw_info->vfe_ops.axi_ops.cfg_comp_mask(
+					vfe_dev, stream);
+			/* The CAMIF status word on this path reports the
+			 * active width (0x660) continuously and its error IRQ
+			 * floods the tasklet queue.  SOF/EOF and the CAMIF
+			 * violation path are separate; mask only CAMIF error
+			 * bit 0 for the luma-only stream. */
+			irq_mask1 = msm_camera_io_r(
+				vfe_dev->vfe_base + 0x2C);
+			irq_mask1 &= ~1;
+			msm_camera_io_w(irq_mask1,
+				vfe_dev->vfe_base + 0x2C);
+		}
 	}
 
 	if (copy_to_user(proc_cmd->cfg_data,
