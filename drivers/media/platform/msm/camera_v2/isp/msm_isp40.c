@@ -588,6 +588,7 @@ static void msm_vfe40_axi_cfg_comp_mask(struct vfe_device *vfe_dev,
 	uint32_t comp_mask, comp_mask_index =
 		stream_info->comp_mask_index;
 	uint32_t irq_mask;
+	uint32_t i;
 
 	comp_mask = msm_camera_io_r(vfe_dev->vfe_base + 0x40);
 	comp_mask &= ~(0x7F << (comp_mask_index * 8));
@@ -599,6 +600,11 @@ static void msm_vfe40_axi_cfg_comp_mask(struct vfe_device *vfe_dev,
 	msm_camera_io_w(comp_mask, vfe_dev->vfe_base + 0x40);
 
 	irq_mask = msm_camera_io_r(vfe_dev->vfe_base + 0x28);
+	/* The composite group owns this stream's completion.  Clear any
+	 * stale per-WM IRQ enables (notably the half-height CBCR WM) so it
+	 * cannot flood the ISP tasklet queue. */
+	for (i = 0; i < stream_info->num_planes; i++)
+		irq_mask &= ~(1 << (stream_info->wm[i] + 8));
 	irq_mask |= 1 << (comp_mask_index + 25);
 	if (stream_info->plane_cfg[0].plane_addr_offset && (comp_mask >> 24))
 		irq_mask |= BIT(28);

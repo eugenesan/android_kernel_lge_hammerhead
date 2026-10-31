@@ -143,6 +143,10 @@ struct msm_vfe_axi_stream_request_cmd {
 	uint32_t init_frame_drop; /*MAX 31 Frames*/
 	enum msm_vfe_frame_skip_pattern frame_skip_pattern;
 	uint8_t buf_divert; /* if TRUE no vb2 buf done. */
+	/* Complete only on the Y write master.  The CBCR WM still writes
+	 * (half-height NV12), but it is not part of the composite group and
+	 * is not waited on.  Used by the luma-only Krux camera path. */
+	uint8_t y_only;
 	/*Return values*/
 	uint32_t axi_stream_handle;
 };

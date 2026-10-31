@@ -709,6 +709,20 @@ int msm_isp_proc_cmd(struct vfe_device *vfe_dev, void *arg)
 		msm_isp_send_hw_cmd(vfe_dev, &reg_cfg_cmd[i],
 			cfg_data, proc_cmd->cmd_len);
 
+	/* The vendor's VFE register program can re-enable the CBCR WM IRQ
+	 * after the stream was configured.  For a luma-only stream, restore
+	 * the composite mask/IRQ state after every upload so the half-height
+	 * CBCR WM cannot flood the tasklet queue. */
+	for (i = 0; i < MAX_NUM_STREAM; i++) {
+		struct msm_vfe_axi_stream *stream =
+			&vfe_dev->axi_data.stream_info[i];
+		if (stream->y_only &&
+		    (stream->state == STARTING || stream->state == ACTIVE) &&
+		    vfe_dev->hw_info->vfe_ops.axi_ops.cfg_comp_mask)
+			vfe_dev->hw_info->vfe_ops.axi_ops.cfg_comp_mask(
+				vfe_dev, stream);
+	}
+
 	if (copy_to_user(proc_cmd->cfg_data,
 			cfg_data, proc_cmd->cmd_len)) {
 		rc = -EFAULT;

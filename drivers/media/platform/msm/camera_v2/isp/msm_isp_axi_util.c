@@ -148,6 +148,7 @@ int msm_isp_validate_axi_request(struct msm_vfe_axi_shared_data *axi_data,
 	stream_info->output_format = stream_cfg_cmd->output_format;
 	stream_info->stream_src = stream_cfg_cmd->stream_src;
 	stream_info->frame_based = stream_cfg_cmd->frame_base;
+	stream_info->y_only = stream_cfg_cmd->y_only;
 	return 0;
 }
 
@@ -250,8 +251,11 @@ void msm_isp_axi_reserve_comp_mask(
 {
 	int i;
 	uint8_t comp_mask = 0;
-	for (i = 0; i < stream_info->num_planes; i++)
+	for (i = 0; i < stream_info->num_planes; i++) {
+		if (stream_info->y_only && i > 0)
+			continue;
 		comp_mask |= 1 << stream_info->wm[i];
+	}
 
 	for (i = 0; i < axi_data->hw_info->num_comp_mask; i++) {
 		if (!axi_data->composite_info[i].stream_handle) {
@@ -702,8 +706,9 @@ static void msm_isp_get_done_buf(struct vfe_device *vfe_dev,
 	struct msm_isp_buffer **done_buf)
 {
 	uint32_t pingpong_bit = 0, i;
+	int planes = stream_info->y_only ? 1 : stream_info->num_planes;
 	pingpong_bit = (~(pingpong_status >> stream_info->wm[0]) & 0x1);
-	for (i = 0; i < stream_info->num_planes; i++) {
+	for (i = 0; i < planes; i++) {
 		if (pingpong_bit !=
 			(~(pingpong_status >> stream_info->wm[i]) & 0x1)) {
 			pr_warn("%s: Write master ping pong mismatch. Status: 0x%x\n",
@@ -1369,6 +1374,11 @@ void msm_isp_process_axi_irq(struct vfe_device *vfe_dev,
 			}
 		}
 		wm_mask &= ~(comp_info->stream_composite_mask);
+		if (stream_info->y_only) {
+			int plane;
+			for (plane = 1; plane < stream_info->num_planes; plane++)
+				wm_mask &= ~(1 << stream_info->wm[plane]);
+		}
 	}
 
 	for (i = 0; i < axi_data->hw_info->num_wm; i++) {

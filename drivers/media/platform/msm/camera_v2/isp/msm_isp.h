@@ -246,6 +246,7 @@ struct msm_vfe_axi_stream {
 	uint32_t stream_handle;
 	uint32_t request_frame;
 	uint8_t buf_divert;
+	uint8_t y_only;
 	enum msm_vfe_axi_stream_type stream_type;
 
 	uint32_t frame_based;
