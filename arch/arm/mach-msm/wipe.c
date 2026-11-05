@@ -1,16 +1,16 @@
 /*
  * RAM wipe for the MSM8974 hammerhead.
  *
- * The kernel is kexec'd with "wipe=" on the command line.  This runs
- * after mm_init(), before the scheduler starts, when the new kernel has
- * a clean memblock but no devices, filesystems or userspace yet.  Every
- * page that is not reserved by this kernel is therefore either free or
- * was used by the previous kernel, so zeroing it covers the old page
- * cache, slab, stacks and process memory.
+ * The kernel is kexec'd with "wipe=" on the command line.  This runs at
+ * the top of mem_init(), after the bootmem bitmap and mem_map exist but
+ * before free_all_bootmem() hands the free pages to the page allocator.
+ * The bootmem bitmap is therefore the authoritative record of which
+ * low-memory pages are free; highmem is not covered by bootmem and is
+ * walked through memblock instead.
  *
- * Reserved regions (the kernel image, page tables, DTB, initrd, TZ,
- * modem and ION carveouts) are skipped: they are either live or must
- * not be touched.
+ * This is deliberately not "wipe everything except _stext.._end": the
+ * page tables, mem_map and other bootmem allocations live outside the
+ * kernel image and would crash the machine if they were zeroed.
  */
 
 #include <linux/init.h>
@@ -18,15 +18,18 @@
 #include <linux/string.h>
 #include <linux/memblock.h>
 #include <linux/mm.h>
+#include <linux/mmzone.h>
+#include <linux/bootmem.h>
 #include <linux/highmem.h>
+#include <linux/bitops.h>
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/smp.h>
-#include <linux/preempt.h>
 #include <linux/irqflags.h>
 
 #include <asm/cacheflush.h>
 #include <asm/barrier.h>
+#include <asm/highmem.h>
 
 #include <mach/msm_iomap.h>
 #include <mach/scm.h>
@@ -40,6 +43,9 @@
 static int wipe_mode;
 static int wipe_verify;
 static unsigned long wipe_test_mb;
+
+/* 0 means "no limit". */
+static phys_addr_t wipe_budget;
 
 static int __init wipe_setup(char *str)
 {
@@ -67,152 +73,77 @@ static int __init wipe_setup(char *str)
 }
 early_param("wipe", wipe_setup);
 
-static void __init wipe_page(phys_addr_t phys)
+static bool __init wipe_take(phys_addr_t len)
 {
-	struct page *page = pfn_to_page(phys >> PAGE_SHIFT);
-	void *v = kmap_atomic(page);
+	if (wipe_budget) {
+		if (len > wipe_budget)
+			return false;
+		wipe_budget -= len;
+	}
+	return true;
+}
 
+static void __init wipe_low_page(unsigned long pfn)
+{
+	if (!wipe_take(PAGE_SIZE))
+		return;
+	memset(__va(PFN_PHYS(pfn)), 0, PAGE_SIZE);
+}
+
+#ifdef CONFIG_HIGHMEM
+static void __init wipe_high_page(unsigned long pfn)
+{
+	void *v;
+
+	if (!wipe_take(PAGE_SIZE))
+		return;
+	v = kmap_atomic_pfn(pfn);
 	memset(v, 0, PAGE_SIZE);
 	kunmap_atomic(v);
 }
+#endif
 
-static void __init wipe_phys(phys_addr_t start, phys_addr_t end)
+static void __init wipe_high_range(phys_addr_t start, phys_addr_t end)
 {
-	phys_addr_t low_end = __pa(high_memory);
-	phys_addr_t p, e;
+#ifdef CONFIG_HIGHMEM
+	unsigned long pfn, last;
 
-	/* Only full pages: a partial page at a free/reserved boundary
-	 * could contain reserved data. */
-	p = PAGE_ALIGN(start);
-	e = end & PAGE_MASK;
-	if (p >= e)
-		return;
+	pfn = PFN_UP(start);
+	last = PFN_DOWN(end);
+	for (; pfn < last; pfn++) {
+		void *v;
 
-	if (p < low_end) {
-		phys_addr_t le = min(e, low_end);
-
-		memset(__va(p), 0, le - p);
-		p = le;
+		if (!wipe_take(PAGE_SIZE))
+			return;
+		v = kmap_atomic_pfn(pfn);
+		memset(v, 0, PAGE_SIZE);
+		kunmap_atomic(v);
 	}
-	while (p < e) {
-		wipe_page(p);
-		p += PAGE_SIZE;
-	}
+#else
+	(void)start;
+	(void)end;
+#endif
 }
 
-/* Wipe the free part of [start, end), stopping after `limit' bytes when
- * limit is non-zero.  Returns the number of free bytes consumed. */
-static phys_addr_t __init wipe_free_range(phys_addr_t start, phys_addr_t end,
-					  phys_addr_t limit)
+static void __init wipe_highmem(void)
 {
+#ifdef CONFIG_HIGHMEM
 	struct memblock_region *r;
-	phys_addr_t cur = start;
-	phys_addr_t done = 0;
-
-	for_each_memblock(reserved, r) {
-		phys_addr_t rs = r->base;
-		phys_addr_t re = r->base + r->size;
-
-		if (re <= cur || rs >= end)
-			continue;
-		if (rs > cur) {
-			phys_addr_t a = cur;
-			phys_addr_t b = min(rs, end);
-
-			if (limit && b - a > limit)
-				b = a + limit;
-			wipe_phys(a, b);
-			done += b - a;
-			if (limit) {
-				limit -= b - a;
-				if (!limit)
-					return done;
-			}
-		}
-		if (re > cur)
-			cur = re;
-		if (cur >= end)
-			break;
-	}
-	if (cur < end) {
-		phys_addr_t a = cur;
-		phys_addr_t b = end;
-
-		if (limit && b - a > limit)
-			b = a + limit;
-		wipe_phys(a, b);
-		done += b - a;
-	}
-	return done;
-}
-
-static void __init wipe_all(void)
-{
-	struct memblock_region *r;
-	phys_addr_t done = 0;
-	phys_addr_t remaining = (phys_addr_t)wipe_test_mb << 20;
-
-	for_each_memblock(memory, r) {
-		phys_addr_t got;
-
-		got = wipe_free_range(r->base, r->base + r->size,
-				      remaining);
-		done += got;
-		if (remaining) {
-			if (got >= remaining)
-				break;
-			remaining -= got;
-		}
-	}
-	pr_info("wipe: %llu MB of free RAM wiped\n",
-		(unsigned long long)(done >> 20));
-}
-
-static int __init wipe_check_page(phys_addr_t phys)
-{
-	struct page *page = pfn_to_page(phys >> PAGE_SHIFT);
-	const u8 *v = kmap_atomic(page);
-	int i, bad = 0;
-
-	for (i = 0; i < PAGE_SIZE; i++) {
-		if (v[i]) {
-			bad = 1;
-			break;
-		}
-	}
-	kunmap_atomic((void *)v);
-	return bad;
-}
-
-static int __init wipe_check_range(phys_addr_t start, phys_addr_t end)
-{
-	phys_addr_t p = PAGE_ALIGN(start);
-	phys_addr_t e = end & PAGE_MASK;
-	int bad = 0;
-
-	if (p >= e)
-		return 0;
-	if (wipe_check_page(p))
-		bad++;
-	if (e - p > PAGE_SIZE && wipe_check_page(e - PAGE_SIZE))
-		bad++;
-	if (e - p > 2 * PAGE_SIZE &&
-	    wipe_check_page((p + e) / 2 & PAGE_MASK))
-		bad++;
-	return bad;
-}
-
-static void __init wipe_verify_all(void)
-{
-	struct memblock_region *r;
-	int bad = 0;
 
 	for_each_memblock(memory, r) {
 		phys_addr_t start = r->base;
 		phys_addr_t end = r->base + r->size;
 		struct memblock_region *res;
-		phys_addr_t cur = start;
+		phys_addr_t cur;
 
+		if (end <= PFN_PHYS(max_low_pfn))
+			continue;
+		if (start < PFN_PHYS(max_low_pfn))
+			start = PFN_PHYS(max_low_pfn);
+		if (start >= end)
+			continue;
+
+		cur = start;
 		for_each_memblock(reserved, res) {
 			phys_addr_t rs = res->base;
 			phys_addr_t re = res->base + res->size;
@@ -220,15 +151,113 @@ static void __init wipe_verify_all(void)
 			if (re <= cur || rs >= end)
 				continue;
 			if (rs > cur)
-				bad += wipe_check_range(cur, min(rs, end));
+				wipe_high_range(cur, min(rs, end));
 			if (re > cur)
 				cur = re;
 			if (cur >= end)
 				break;
 		}
 		if (cur < end)
-			bad += wipe_check_range(cur, end);
+			wipe_high_range(cur, end);
+		if (wipe_budget && !wipe_budget)
+			break;
 	}
+#endif
+}
+
+static void __init wipe_lowmem(void)
+{
+	bootmem_data_t *bdata = NODE_DATA(0)->bdata;
+	unsigned long pfn, last;
+	unsigned long idx;
+
+	if (!bdata || !bdata->node_bootmem_map)
+		return;
+
+	pfn = bdata->node_min_pfn;
+	last = bdata->node_low_pfn;
+	idx = 0;
+
+	while (pfn < last) {
+		unsigned long run;
+
+		if (wipe_budget && !wipe_budget)
+			return;
+
+		/* Skip allocated pages.  The bitmap is word-sized, so
+		 * look for a zero bit rather than testing every page. */
+		run = find_next_zero_bit(bdata->node_bootmem_map,
+					 last - bdata->node_min_pfn, idx);
+		if (run >= last - bdata->node_min_pfn)
+			break;
+		idx = run;
+		pfn = bdata->node_min_pfn + idx;
+		wipe_low_page(pfn);
+		idx++;
+	}
+}
+
+static void __init wipe_all(void)
+{
+	if (wipe_test_mb)
+		wipe_budget = (phys_addr_t)wipe_test_mb << 20;
+
+	wipe_lowmem();
+	wipe_highmem();
+}
+
+static int __init wipe_check_page(unsigned long pfn)
+{
+	const u8 *v;
+	int i, bad = 0;
+
+#ifdef CONFIG_HIGHMEM
+	v = kmap_atomic_pfn(pfn);
+#else
+	v = __va(PFN_PHYS(pfn));
+#endif
+	for (i = 0; i < PAGE_SIZE; i++) {
+		if (v[i]) {
+			bad = 1;
+			break;
+		}
+	}
+#ifdef CONFIG_HIGHMEM
+	kunmap_atomic((void *)v);
+#endif
+	return bad;
+}
+
+static int __init wipe_check_lowmem(void)
+{
+	bootmem_data_t *bdata = NODE_DATA(0)->bdata;
+	unsigned long pfn, last;
+	unsigned long idx;
+	int bad = 0;
+
+	if (!bdata || !bdata->node_bootmem_map)
+		return 0;
+	pfn = bdata->node_min_pfn;
+	last = bdata->node_low_pfn;
+	idx = 0;
+	while (pfn < last) {
+		unsigned long run = find_next_zero_bit(bdata->node_bootmem_map,
+						       last - bdata->node_min_pfn,
+						       idx);
+		if (run >= last - bdata->node_min_pfn)
+			break;
+		idx = run;
+		pfn = bdata->node_min_pfn + idx;
+		bad += wipe_check_page(pfn);
+		idx++;
+	}
+	return bad;
+}
+
+static void __init wipe_verify_all(void)
+{
+	int bad = wipe_check_lowmem();
+
 	if (bad)
 		pr_err("wipe: verification FAILED (%d sampled pages non-zero)\n",
 		       bad);
@@ -255,10 +284,8 @@ void __init wipe_main(void)
 	if (!wipe_mode)
 		return;
 
-	/* IRQs are already disabled here (start_kernel disables them
-	 * before setup_arch).  Do not touch preempt_count: the scheduler
-	 * is not initialised yet, and preempt_enable() could try to
-	 * schedule on the way out of test mode. */
+	/* IRQs are already disabled here.  Do not touch preempt_count:
+	 * the scheduler is not initialised yet. */
 	local_irq_disable();
 	local_fiq_disable();
 

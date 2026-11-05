@@ -26,6 +26,10 @@
 
 #include <asm/mach-types.h>
 #include <asm/memblock.h>
+
+#ifdef CONFIG_MEMORY_WIPE
+extern void wipe_main(void);
+#endif
 #include <asm/prom.h>
 #include <asm/sections.h>
 #include <asm/setup.h>
@@ -744,6 +748,9 @@ static void __init free_highpages(void)
  */
 void __init mem_init(void)
 {
+#ifdef CONFIG_MEMORY_WIPE
+	wipe_main();
+#endif
 	unsigned long reserved_pages, free_pages;
 	struct memblock_region *reg;
 	int i;
