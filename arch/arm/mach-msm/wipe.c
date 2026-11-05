@@ -306,6 +306,9 @@ void __init wipe_main(void)
 			(unsigned long long)(memblock.reserved.total_size >> 20));
 		pr_info("wipe: max_low_pfn=%lu max_pfn=%lu\n",
 			max_low_pfn, max_pfn);
+		pr_info("wipe: mem_map phys=0x%llx size=%lu KB\n",
+			(unsigned long long)__pa(mem_map),
+			(unsigned long)(max_mapnr * sizeof(struct page)) >> 10);
 		if (bdata && bdata->node_bootmem_map) {
 			pfn = bdata->node_min_pfn;
 			last = bdata->node_low_pfn;
@@ -326,6 +329,31 @@ void __init wipe_main(void)
 			pr_info("wipe: bootmem min=%lu low=%lu free=%lu pages\n",
 				bdata->node_min_pfn, bdata->node_low_pfn,
 				free);
+			{
+				unsigned long p, lim, s = 0;
+				int in = 0;
+
+				lim = min(bdata->node_low_pfn,
+					  (unsigned long)(32 << 20) >> PAGE_SHIFT);
+				for (p = bdata->node_min_pfn; p < lim; p++) {
+					int used = test_bit(
+						p - bdata->node_min_pfn,
+						bdata->node_bootmem_map);
+					if (used && !in) {
+						s = p;
+						in = 1;
+					} else if (!used && in) {
+						pr_info("wipe: used 0x%llx..0x%llx\n",
+							(unsigned long long)PFN_PHYS(s),
+							(unsigned long long)PFN_PHYS(p));
+						in = 0;
+					}
+				}
+				if (in)
+					pr_info("wipe: used 0x%llx..0x%llx\n",
+						(unsigned long long)PFN_PHYS(s),
+						(unsigned long long)PFN_PHYS(lim));
+			}
 		}
 		return;
 	}
