@@ -255,9 +255,12 @@ void __init wipe_main(void)
 	if (!wipe_mode)
 		return;
 
+	/* IRQs are already disabled here (start_kernel disables them
+	 * before setup_arch).  Do not touch preempt_count: the scheduler
+	 * is not initialised yet, and preempt_enable() could try to
+	 * schedule on the way out of test mode. */
 	local_irq_disable();
 	local_fiq_disable();
-	preempt_disable();
 
 	pr_crit("wipe: start (mode %d, test %lu MB, verify %d)\n",
 		wipe_mode, wipe_test_mb, wipe_verify);
@@ -276,7 +279,6 @@ void __init wipe_main(void)
 
 	if (wipe_mode == WIPE_MODE_TEST) {
 		pr_crit("wipe: test complete, continuing boot\n");
-		preempt_enable();
 		return;
 	}
 
