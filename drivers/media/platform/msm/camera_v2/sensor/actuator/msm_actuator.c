@@ -13,6 +13,7 @@
 #define pr_fmt(fmt) "%s:%d " fmt, __func__, __LINE__
 
 #include <linux/module.h>
+#include <linux/kernel.h>
 #include <linux/cred.h>
 #include <linux/init_task.h>
 #include <linux/ratelimit.h>
@@ -97,7 +98,9 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 						i2c_byte1, i2c_byte2);
 					if (a_ctrl->i2c_tbl_index >
 						a_ctrl->total_steps) {
-						pr_err("failed:i2c table index out of bound\n");
+						pr_err_ratelimited("failed:i2c table index %u > steps %u\n",
+							a_ctrl->i2c_tbl_index,
+							a_ctrl->total_steps);
 						break;
 					}
 					i2c_tbl[a_ctrl->i2c_tbl_index].
@@ -479,6 +482,15 @@ static int32_t msm_actuator_init(struct msm_actuator_ctrl_t *a_ctrl,
 		return -EFAULT;
 	}
 
+	pr_err("actuator init: steps=%u region=%u regs=%u data=%u code=%d addr=0x%x at=%u dt=%u\n",
+	       set_info->af_tuning_params.total_steps,
+	       set_info->af_tuning_params.region_size,
+	       set_info->actuator_params.reg_tbl_size,
+	       set_info->actuator_params.data_size,
+	       set_info->af_tuning_params.initial_code,
+	       set_info->actuator_params.i2c_addr,
+	       set_info->actuator_params.i2c_addr_type,
+	       set_info->actuator_params.i2c_data_type);
 	a_ctrl->region_size = set_info->af_tuning_params.region_size;
 	a_ctrl->pwd_step = set_info->af_tuning_params.pwd_step;
 	a_ctrl->total_steps = set_info->af_tuning_params.total_steps;
@@ -581,6 +593,41 @@ static int32_t msm_actuator_init(struct msm_actuator_ctrl_t *a_ctrl,
  * CFG_SET_ACTUATOR_INFO.  Dump the whole set_info (scalars plus the
  * register/tuning/region arrays) so userspace can reproduce autofocus.
  */
+/* Append one line to /data/local/tmp/actuator_seq.log so the vendor
+ * HAL's call order can be replayed exactly. */
+static void act_log(const char *fmt, ...)
+{
+	struct file *f;
+	loff_t pos = 0;
+	const struct cred *old;
+	mm_segment_t old_fs;
+	char buf[160];
+	va_list ap;
+	int n;
+
+	va_start(ap, fmt);
+	n = vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	if (n <= 0)
+		return;
+	if (n > (int)sizeof(buf) - 1)
+		n = sizeof(buf) - 1;
+
+	old = override_creds(&init_cred);
+	f = filp_open("/data/local/tmp/actuator_seq.log",
+		      O_WRONLY | O_CREAT | O_APPEND, 0666);
+	if (IS_ERR(f)) {
+		revert_creds(old);
+		return;
+	}
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	vfs_write(f, buf, n, &pos);
+	set_fs(old_fs);
+	filp_close(f, NULL);
+	revert_creds(old);
+}
+
 static void actuator_dump_set_info(const struct msm_actuator_set_info_t *si)
 {
 	static int done;
@@ -661,6 +708,7 @@ static int32_t msm_actuator_config(struct msm_actuator_ctrl_t *a_ctrl,
 	mutex_lock(a_ctrl->actuator_mutex);
 	CDBG("Enter\n");
 	CDBG("%s type %d\n", __func__, cdata->cfgtype);
+	act_log("cfg type=%d\n", cdata->cfgtype);
 	switch (cdata->cfgtype) {
 	case CFG_GET_ACTUATOR_INFO:
 		cdata->is_af_supported = 1;
@@ -675,6 +723,10 @@ static int32_t msm_actuator_config(struct msm_actuator_ctrl_t *a_ctrl,
 		break;
 
 	case CFG_SET_DEFAULT_FOCUS:
+		act_log("default_focus dir=%d sign=%d dest=%d steps=%d inf=%d\n",
+			cdata->cfg.move.dir, cdata->cfg.move.sign_dir,
+			cdata->cfg.move.dest_step_pos, cdata->cfg.move.num_steps,
+			cdata->cfg.move.num_steps_inf_pos);
 		rc = a_ctrl->func_tbl->actuator_set_default_focus(a_ctrl,
 			&cdata->cfg.move);
 		if (rc < 0)
@@ -682,6 +734,10 @@ static int32_t msm_actuator_config(struct msm_actuator_ctrl_t *a_ctrl,
 		break;
 
 	case CFG_MOVE_FOCUS:
+		act_log("move dir=%d sign=%d dest=%d steps=%d inf=%d\n",
+			cdata->cfg.move.dir, cdata->cfg.move.sign_dir,
+			cdata->cfg.move.dest_step_pos, cdata->cfg.move.num_steps,
+			cdata->cfg.move.num_steps_inf_pos);
 		rc = a_ctrl->func_tbl->actuator_move_focus(a_ctrl,
 			&cdata->cfg.move);
 		if (rc < 0)
@@ -745,6 +801,7 @@ static int msm_actuator_open(struct v4l2_subdev *sd,
 		pr_err("failed\n");
 		return -EINVAL;
 	}
+	act_log("open\n");
 	if (a_ctrl->act_device_type == MSM_CAMERA_PLATFORM_DEVICE) {
 		rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_util(
 			&a_ctrl->i2c_client, MSM_CCI_INIT);
@@ -764,6 +821,7 @@ static int msm_actuator_close(struct v4l2_subdev *sd,
 		pr_err("failed\n");
 		return -EINVAL;
 	}
+	act_log("close\n");
 	if (a_ctrl->act_device_type == MSM_CAMERA_PLATFORM_DEVICE) {
 		rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_util(
 			&a_ctrl->i2c_client, MSM_CCI_RELEASE);
