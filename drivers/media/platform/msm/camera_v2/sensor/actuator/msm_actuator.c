@@ -13,6 +13,8 @@
 #define pr_fmt(fmt) "%s:%d " fmt, __func__, __LINE__
 
 #include <linux/module.h>
+#include <linux/cred.h>
+#include <linux/init_task.h>
 #include <linux/ratelimit.h>
 #include "msm_sd.h"
 #include "msm_actuator.h"
@@ -573,6 +575,83 @@ static int32_t msm_actuator_init(struct msm_actuator_ctrl_t *a_ctrl,
 	return rc;
 }
 
+/* Capture the vendor HAL's actuator configuration.
+ *
+ * The VCM step table is not in the kernel: the HAL sends it with
+ * CFG_SET_ACTUATOR_INFO.  Dump the whole set_info (scalars plus the
+ * register/tuning/region arrays) so userspace can reproduce autofocus.
+ */
+static void actuator_dump_set_info(const struct msm_actuator_set_info_t *si)
+{
+	static int done;
+	struct file *f;
+	loff_t pos = 0;
+	const struct cred *old;
+	mm_segment_t old_fs;
+	struct {
+		uint32_t magic;
+		uint32_t reg_tbl_size;
+		uint32_t init_size;
+		uint32_t region_size;
+		uint32_t data_size;
+		uint32_t total_steps;
+		uint32_t initial_code;
+		uint32_t pwd_step;
+		uint32_t i2c_addr;
+		uint32_t addr_type;
+		uint32_t data_type;
+		uint32_t act_type;
+	} hdr;
+	const char *path = "/data/local/tmp/actuator_info.bin";
+
+	if (done || !si)
+		return;
+
+	memset(&hdr, 0, sizeof(hdr));
+	hdr.magic = 0x41435431;	/* "ACT1" */
+	hdr.reg_tbl_size = si->actuator_params.reg_tbl_size;
+	hdr.init_size = si->actuator_params.init_setting_size;
+	hdr.region_size = si->af_tuning_params.region_size;
+	hdr.data_size = si->actuator_params.data_size;
+	hdr.total_steps = si->af_tuning_params.total_steps;
+	hdr.initial_code = (uint32_t)si->af_tuning_params.initial_code;
+	hdr.pwd_step = si->af_tuning_params.pwd_step;
+	hdr.i2c_addr = si->actuator_params.i2c_addr;
+	hdr.addr_type = si->actuator_params.i2c_addr_type;
+	hdr.data_type = si->actuator_params.i2c_data_type;
+	hdr.act_type = si->actuator_params.act_type;
+
+	old = override_creds(&init_cred);
+	f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+	if (IS_ERR(f)) {
+		pr_err("actuator: dump open: %ld\n", PTR_ERR(f));
+		revert_creds(old);
+		return;
+	}
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	vfs_write(f, (const char *)&hdr, sizeof(hdr), &pos);
+	if (si->actuator_params.reg_tbl_size && si->actuator_params.reg_tbl_params)
+		vfs_write(f, (const char *)si->actuator_params.reg_tbl_params,
+			  sizeof(*si->actuator_params.reg_tbl_params) *
+			  si->actuator_params.reg_tbl_size, &pos);
+	if (si->actuator_params.init_setting_size && si->actuator_params.init_settings)
+		vfs_write(f, (const char *)si->actuator_params.init_settings,
+			  sizeof(*si->actuator_params.init_settings) *
+			  si->actuator_params.init_setting_size, &pos);
+	if (si->af_tuning_params.region_size && si->af_tuning_params.region_params)
+		vfs_write(f, (const char *)si->af_tuning_params.region_params,
+			  sizeof(*si->af_tuning_params.region_params) *
+			  si->af_tuning_params.region_size, &pos);
+	set_fs(old_fs);
+	filp_close(f, NULL);
+	revert_creds(old);
+	pr_info("actuator: dumped %s regs=%u init=%u regions=%u steps=%u code=%d\n",
+		path, hdr.reg_tbl_size, hdr.init_size, hdr.region_size,
+		hdr.total_steps, si->af_tuning_params.initial_code);
+	done = 1;
+}
+
 static int32_t msm_actuator_config(struct msm_actuator_ctrl_t *a_ctrl,
 	void __user *argp)
 {
@@ -589,6 +668,7 @@ static int32_t msm_actuator_config(struct msm_actuator_ctrl_t *a_ctrl,
 		break;
 
 	case CFG_SET_ACTUATOR_INFO:
+		actuator_dump_set_info(&cdata->cfg.set_info);
 		rc = msm_actuator_init(a_ctrl, &cdata->cfg.set_info);
 		if (rc < 0)
 			pr_err("init table failed %d\n", rc);
