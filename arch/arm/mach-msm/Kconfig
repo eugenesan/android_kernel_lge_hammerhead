@@ -2477,6 +2477,19 @@ config MSM_DLOAD_MODE
 		make the kernel reboot on a kernel panic - that must be
 		enabled via another mechanism.
 
+config MEMORY_WIPE
+	bool "Wipe RAM when booting with wipe= (MSM8974)"
+	depends on ARCH_MSM8974 && KEXEC
+	default n
+	help
+	  When the kernel is kexec'd with wipe= on the command line, zero
+	  every page of RAM that this kernel has not reserved, flush the
+	  caches and power off.  Used as the final action of a shutdown or
+	  reboot so the previous kernel's memory is not left in DRAM.
+
+	  wipe=test[:MB] wipes a bounded amount and continues booting, for
+	  testing.  wipe=verify additionally samples the wiped pages.
+
 config MSM_JTAG
 	bool "Debug and ETM trace support across power collapse"
 	help

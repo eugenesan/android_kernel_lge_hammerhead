@@ -527,6 +527,10 @@ asmlinkage void __init start_kernel(void)
 	trap_init();
 	mm_init();
 
+#ifdef CONFIG_MEMORY_WIPE
+	wipe_main();
+#endif
+
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
 	 * timer interrupt). Full topology setup happens at smp_init()
