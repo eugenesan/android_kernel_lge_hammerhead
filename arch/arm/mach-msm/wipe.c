@@ -47,6 +47,7 @@ static unsigned long wipe_test_mb;
 
 /* 0 means "no limit". */
 static phys_addr_t wipe_budget;
+static phys_addr_t wipe_done;
 
 static int __init wipe_setup(char *str)
 {
@@ -85,6 +86,7 @@ static bool __init wipe_take(phys_addr_t len)
 			return false;
 		wipe_budget -= len;
 	}
+	wipe_done += len;
 	return true;
 }
 
@@ -209,6 +211,8 @@ static void __init wipe_all(void)
 
 	wipe_lowmem();
 	wipe_highmem();
+	pr_info("wipe: %llu MB wiped\n",
+		(unsigned long long)(wipe_done >> 20));
 }
 
 static int __init wipe_check_page(unsigned long pfn)
