@@ -169,6 +169,9 @@ void machine_kexec(struct kimage *image)
 		unsigned long *p;
 		unsigned long dtb = kexec_dtb_address(image);
 
+		pr_info("kexec: entry=%08lx dtb=%08lx head=%08lx\n",
+			(unsigned long)image->start, dtb, page_list);
+
 #define KEXEC_PARAM(name, value)					\
 	do {								\
 		p = (void *)((char *)reboot_code_buffer +		\
