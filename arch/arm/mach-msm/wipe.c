@@ -39,6 +39,7 @@
 #define WIPE_MODE_NONE		0
 #define WIPE_MODE_ALL		1
 #define WIPE_MODE_TEST		2
+#define WIPE_MODE_INFO		3
 
 static int wipe_mode;
 static int wipe_verify;
@@ -59,6 +60,10 @@ static int __init wipe_setup(char *str)
 	if (!strcmp(str, "verify")) {
 		wipe_mode = WIPE_MODE_ALL;
 		wipe_verify = 1;
+		return 1;
+	}
+	if (!strcmp(str, "info")) {
+		wipe_mode = WIPE_MODE_INFO;
 		return 1;
 	}
 	if (!strncmp(str, "test", 4)) {
@@ -291,6 +296,39 @@ void __init wipe_main(void)
 
 	pr_crit("wipe: start (mode %d, test %lu MB, verify %d)\n",
 		wipe_mode, wipe_test_mb, wipe_verify);
+
+	if (wipe_mode == WIPE_MODE_INFO) {
+		bootmem_data_t *bdata = NODE_DATA(0)->bdata;
+		unsigned long pfn, last, idx = 0, free = 0;
+
+		pr_info("wipe: memblock memory=%llu MB reserved=%llu MB\n",
+			(unsigned long long)(memblock.memory.total_size >> 20),
+			(unsigned long long)(memblock.reserved.total_size >> 20));
+		pr_info("wipe: max_low_pfn=%lu max_pfn=%lu\n",
+			max_low_pfn, max_pfn);
+		if (bdata && bdata->node_bootmem_map) {
+			pfn = bdata->node_min_pfn;
+			last = bdata->node_low_pfn;
+			while (pfn < last) {
+				unsigned long run = find_next_zero_bit(
+					bdata->node_bootmem_map,
+					last - bdata->node_min_pfn, idx);
+				if (run >= last - bdata->node_min_pfn)
+					break;
+				if (free < 8)
+					pr_info("wipe: free pfn %lu phys 0x%llx\n",
+						bdata->node_min_pfn + run,
+						(unsigned long long)PFN_PHYS(
+							bdata->node_min_pfn + run));
+				free++;
+				idx = run + 1;
+			}
+			pr_info("wipe: bootmem min=%lu low=%lu free=%lu pages\n",
+				bdata->node_min_pfn, bdata->node_low_pfn,
+				free);
+		}
+		return;
+	}
 
 	if (num_online_cpus() > 1)
 		smp_send_stop();
