@@ -14,6 +14,7 @@
 #include <asm/cacheflush.h>
 #include <asm/mach-types.h>
 #include <asm/system_misc.h>
+#include <asm/highmem.h>
 
 extern const unsigned char relocate_new_kernel[];
 extern const unsigned int relocate_new_kernel_size;
@@ -104,6 +105,40 @@ void machine_crash_shutdown(struct pt_regs *regs)
  */
 void (*kexec_reinit)(void);
 
+/*
+ * Find the DTB segment loaded by kexec-tools.  The generic ARM entry
+ * assumes an ATAGS block 0x7000 bytes below the zImage, which is too
+ * small for a modern DTB (hammerhead's is ~176 KB).  kexec-tools puts
+ * the DTB in its own segment, so pass that address in r2 instead.
+ */
+static unsigned long kexec_dtb_address(struct kimage *image)
+{
+	int i;
+	unsigned long low = __pa(high_memory);
+
+	for (i = 0; i < image->nr_segments; i++) {
+		unsigned long mem = image->segment[i].mem;
+		unsigned long size = image->segment[i].memsz;
+		u32 magic;
+
+		if (size < 8)
+			continue;
+		if (mem + 4 <= low) {
+			magic = *(u32 *)__va(mem);
+		} else {
+			unsigned long pfn = PFN_DOWN(mem);
+			unsigned long off = mem & (PAGE_SIZE - 1);
+			void *v = kmap_atomic_pfn(pfn);
+
+			magic = *(u32 *)((char *)v + off);
+			kunmap_atomic(v);
+		}
+		if (magic == 0xd00dfeed)
+			return mem;
+	}
+	return 0;
+}
+
 void machine_kexec(struct kimage *image)
 {
 	unsigned long page_list;
@@ -132,6 +167,7 @@ void machine_kexec(struct kimage *image)
 	 */
 	{
 		unsigned long *p;
+		unsigned long dtb = kexec_dtb_address(image);
 
 #define KEXEC_PARAM(name, value)					\
 	do {								\
@@ -144,8 +180,8 @@ void machine_kexec(struct kimage *image)
 		KEXEC_PARAM(kexec_indirection_page, page_list);
 		KEXEC_PARAM(kexec_mach_type, machine_arch_type);
 		KEXEC_PARAM(kexec_boot_atags,
-			    image->start - KEXEC_ARM_ZIMAGE_OFFSET +
-			    KEXEC_ARM_ATAGS_OFFSET);
+			    dtb ? dtb : (image->start - KEXEC_ARM_ZIMAGE_OFFSET +
+					 KEXEC_ARM_ATAGS_OFFSET));
 #undef KEXEC_PARAM
 	}
 
