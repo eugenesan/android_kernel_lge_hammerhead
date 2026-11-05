@@ -26,6 +26,7 @@
 #include <linux/delay.h>
 #include <linux/smp.h>
 #include <linux/irqflags.h>
+#include <linux/reboot.h>
 
 #include <asm/cacheflush.h>
 #include <asm/barrier.h>
@@ -48,6 +49,7 @@ static unsigned long wipe_test_mb;
 /* 0 means "no limit". */
 static phys_addr_t wipe_budget;
 static phys_addr_t wipe_done;
+static int wipe_poweroff_pending;
 
 static int __init wipe_setup(char *str)
 {
@@ -274,9 +276,9 @@ static void __init wipe_verify_all(void)
 		pr_info("wipe: verification OK\n");
 }
 
-static void __init wipe_power_off(void)
+static void __init wipe_force_power_off(void)
 {
-	pr_crit("wipe: powering off\n");
+	pr_crit("wipe: forcing power off\n");
 
 #ifdef CONFIG_MSM_RESTART_V2
 	/* Avoid an SPMI transaction when PS_HOLD is lowered. */
@@ -379,7 +381,21 @@ void __init wipe_main(void)
 		return;
 	}
 
-	wipe_power_off();
+	/* Power off from kernel_init(), after the PMIC/restart drivers
+	 * have initialised, so the normal poweroff path is used. */
+	wipe_poweroff_pending = 1;
+}
+
+void wipe_poweroff(void)
+{
+	if (!wipe_poweroff_pending)
+		return;
+
+	pr_crit("wipe: powering off\n");
+	kernel_power_off();
+
+	/* kernel_power_off() should not return. */
+	wipe_force_power_off();
 	while (1)
 		barrier();
 }

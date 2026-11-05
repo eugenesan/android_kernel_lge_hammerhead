@@ -799,6 +799,10 @@ static void __init do_pre_smp_initcalls(void)
 		do_one_initcall(*fn);
 }
 
+#ifdef CONFIG_MEMORY_WIPE
+extern void wipe_poweroff(void);
+#endif
+
 static void run_init_process(const char *init_filename)
 {
 	argv_init[0] = init_filename;
@@ -876,6 +880,10 @@ static int __init kernel_init(void * unused)
 	sched_init_smp();
 
 	do_basic_setup();
+
+#ifdef CONFIG_MEMORY_WIPE
+	wipe_poweroff();
+#endif
 
 	/* Open the /dev/console on the rootfs, this should never fail */
 	if (sys_open((const char __user *) "/dev/console", O_RDWR, 0) < 0)
