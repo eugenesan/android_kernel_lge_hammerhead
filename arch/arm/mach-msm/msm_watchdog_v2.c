@@ -75,6 +75,7 @@ struct msm_watchdog_data {
  * By default watchdog is turned on
  */
 static int enable = 1;
+static struct msm_watchdog_data *wdog_global;
 module_param(enable, int, 0);
 
 /*
@@ -563,6 +564,7 @@ static int __devinit msm_watchdog_probe(struct platform_device *pdev)
 		goto err;
 	wdog_dd->dev = &pdev->dev;
 	platform_set_drvdata(pdev, wdog_dd);
+	wdog_global = wdog_dd;
 	cpumask_clear(&wdog_dd->alive_mask);
 	INIT_WORK(&wdog_dd->init_dogwork_struct, init_watchdog_work);
 	INIT_DELAYED_WORK(&wdog_dd->dogwork_struct, pet_watchdog_work);
@@ -589,6 +591,19 @@ static struct platform_driver msm_watchdog_driver = {
 		.of_match_table = msm_wdog_match_table,
 	},
 };
+
+/* Called from arch_kexec() just before jumping to the new kernel.
+ * The watchdog keeps running across the jump and would reset the SoC
+ * while the new kernel is still booting. */
+void msm_watchdog_v2_disable(void)
+{
+	if (wdog_global) {
+		__raw_writel(0, wdog_global->base + WDT0_EN);
+		mb();
+		pr_crit("MSM Watchdog V2 deactivated for kexec\n");
+	}
+}
+EXPORT_SYMBOL(msm_watchdog_v2_disable);
 
 static int __devinit init_watchdog(void)
 {
