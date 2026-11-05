@@ -308,7 +308,7 @@ void __init wipe_main(void)
 			max_low_pfn, max_pfn);
 		pr_info("wipe: mem_map phys=0x%llx size=%lu KB\n",
 			(unsigned long long)__pa(mem_map),
-			(unsigned long)(max_mapnr * sizeof(struct page)) >> 10);
+			(unsigned long)(max_pfn * sizeof(struct page)) >> 10);
 		if (bdata && bdata->node_bootmem_map) {
 			pfn = bdata->node_min_pfn;
 			last = bdata->node_low_pfn;
@@ -334,7 +334,7 @@ void __init wipe_main(void)
 				int in = 0;
 
 				lim = min(bdata->node_low_pfn,
-					  (unsigned long)(32 << 20) >> PAGE_SHIFT);
+					  (unsigned long)(64 << 20) >> PAGE_SHIFT);
 				for (p = bdata->node_min_pfn; p < lim; p++) {
 					int used = test_bit(
 						p - bdata->node_min_pfn,
