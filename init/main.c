@@ -466,6 +466,10 @@ static void __init mm_init(void)
 	vmalloc_init();
 }
 
+#ifdef CONFIG_MEMORY_WIPE
+extern void wipe_main(void);
+#endif
+
 asmlinkage void __init start_kernel(void)
 {
 	char * command_line;
