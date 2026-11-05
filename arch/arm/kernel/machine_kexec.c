@@ -119,16 +119,35 @@ void machine_kexec(struct kimage *image)
 	    page_to_pfn(image->control_code_page) << PAGE_SHIFT;
 	reboot_code_buffer = page_address(image->control_code_page);
 
-	/* Prepare parameters for reboot_code_buffer*/
-	kexec_start_address = image->start;
-	kexec_indirection_page = page_list;
-	kexec_mach_type = machine_arch_type;
-	kexec_boot_atags = image->start - KEXEC_ARM_ZIMAGE_OFFSET + KEXEC_ARM_ATAGS_OFFSET;
-
 	/* copy our kernel relocation code to the control code page */
 	memcpy(reboot_code_buffer,
 	       relocate_new_kernel, relocate_new_kernel_size);
 
+	/*
+	 * Prepare the parameters in the *copied* block, not in the
+	 * original symbols: with CONFIG_STRICT_MEMORY_RWX the kernel
+	 * text is read-only, and writing kexec_start_address there
+	 * faults.  relocate_new_kernel_size covers the parameter words
+	 * at the end of the copied code.
+	 */
+	{
+		unsigned long *p;
+
+#define KEXEC_PARAM(name, value)					\
+	do {								\
+		p = (void *)((char *)reboot_code_buffer +		\
+			((char *)&name - (char *)relocate_new_kernel));	\
+		*p = (value);						\
+	} while (0)
+
+		KEXEC_PARAM(kexec_start_address, image->start);
+		KEXEC_PARAM(kexec_indirection_page, page_list);
+		KEXEC_PARAM(kexec_mach_type, machine_arch_type);
+		KEXEC_PARAM(kexec_boot_atags,
+			    image->start - KEXEC_ARM_ZIMAGE_OFFSET +
+			    KEXEC_ARM_ATAGS_OFFSET);
+#undef KEXEC_PARAM
+	}
 
 	flush_icache_range((unsigned long) reboot_code_buffer,
 			   (unsigned long) reboot_code_buffer + KEXEC_CONTROL_PAGE_SIZE);
