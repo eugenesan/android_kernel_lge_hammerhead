@@ -22,6 +22,8 @@
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/module.h>
+#include <linux/cred.h>
+#include <linux/init_task.h>
 #include <linux/regulator/consumer.h>
 #include <linux/ion.h>
 #include <linux/proc_fs.h>
@@ -1263,6 +1265,64 @@ static int msm_cpp_flush_frames(struct cpp_device *cpp_dev)
 {
 	return 0;
 }
+/* Per-frame CPP configuration capture.
+ *
+ * The camera HAL sends one msm_cpp_frame_info_t per frame.  Dumping the
+ * struct (input/output buffer info, identity, strip count) together with
+ * the command words lets userspace reproduce the HAL's sequence exactly
+ * instead of guessing which capture buffer the CPP must read.
+ *
+ * Files land in /data/local/tmp, which adb shell can read, so no root is
+ * needed to collect them.  The number written is capped by
+ * cpp_dump_frames (module parameter, default 64; 0 disables).
+ */
+static int cpp_dump_frames = 64;
+module_param(cpp_dump_frames, int, 0644);
+MODULE_PARM_DESC(cpp_dump_frames, "number of CPP frame configs to dump");
+
+static void cpp_dump_frame(const struct msm_cpp_frame_info_t *u,
+			   const uint32_t *msg)
+{
+	static u32 idx;
+	char path[80];
+	struct file *f;
+	loff_t pos = 0;
+	const struct cred *old;
+	int w;
+
+	if (cpp_dump_frames <= 0 || idx >= (u32)cpp_dump_frames)
+		return;
+
+	snprintf(path, sizeof(path), "/data/local/tmp/cpp_frm_%03u.bin", idx);
+	old = override_creds(&init_cred);
+	f = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+	if (IS_ERR(f)) {
+		pr_err("cpp: dump open %s: %ld\n", path, PTR_ERR(f));
+		revert_creds(old);
+		return;
+	}
+	/* The buffers are kernel memory, so the file layer must not treat
+	 * them as user addresses. */
+	{
+		mm_segment_t old_fs = get_fs();
+		set_fs(KERNEL_DS);
+		w = vfs_write(f, (const char *)u, sizeof(*u), &pos);
+		if (w == sizeof(*u) && msg && u->msg_len)
+			w = vfs_write(f, (const char *)msg,
+				      sizeof(uint32_t) * u->msg_len, &pos);
+		set_fs(old_fs);
+	}
+	filp_close(f, NULL);
+	revert_creds(old);
+
+	pr_info("cpp: dump %s in=%u fd=%d native=%u out0=%u out1=%u id=0x%x strips=%u words=%u\n",
+		path, u->input_buffer_info.index, u->input_buffer_info.fd,
+		u->input_buffer_info.native_buff, u->output_buffer_info[0].index,
+		u->output_buffer_info[1].index, u->identity, u->num_strips,
+		u->msg_len);
+	idx++;
+}
+
 
 static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 	struct msm_camera_v4l2_ioctl_t *ioctl_ptr)
@@ -1322,6 +1382,15 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 		ERR_COPY_FROM_USER();
 		rc = -EINVAL;
 		goto ERROR2;
+	}
+
+	{
+		struct msm_cpp_frame_info_t *snap =
+			kmemdup(new_frame, sizeof(*new_frame), GFP_KERNEL);
+		if (snap) {
+			cpp_dump_frame(snap, cpp_frame_msg);
+			kfree(snap);
+		}
 	}
 
 	new_frame->cpp_cmd_msg = cpp_frame_msg;
