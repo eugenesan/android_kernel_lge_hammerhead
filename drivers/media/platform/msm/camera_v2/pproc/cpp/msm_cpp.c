@@ -1074,6 +1074,16 @@ static int msm_cpp_notify_frame_done(struct cpp_device *cpp_dev)
 	if (queue->len > 0) {
 		frame_qcmd = msm_dequeue(queue, list_frame);
 		processed_frame = frame_qcmd->command;
+		if (processed_frame->frame_id % 50 == 0) {
+			static int done_n;
+
+			/* The frame id is not always set, so count. */
+			if ((++done_n % 100) == 0)
+				pr_info("%s: frame %d in %u out %u\n",
+					__func__, processed_frame->frame_id,
+					processed_frame->input_buffer_info.index,
+					processed_frame->output_buffer_info[0].index);
+		}
 		do_gettimeofday(&(processed_frame->out_time));
 		kfree(frame_qcmd);
 		event_qcmd = kzalloc(sizeof(struct msm_queue_cmd), GFP_ATOMIC);
@@ -1427,7 +1437,9 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 		&buff_mgr_info);
 	if (rc < 0) {
 		rc = -EAGAIN;
-		pr_debug("error getting buffer rc:%d\n", rc);
+		pr_err("error getting buffer rc:%d (session %d stream %d, input buf %d)\n",
+			rc, buff_mgr_info.session_id, buff_mgr_info.stream_id,
+			new_frame->input_buffer_info.index);
 		goto ERROR2;
 	}
 	new_frame->output_buffer_info[0].index = buff_mgr_info.index;

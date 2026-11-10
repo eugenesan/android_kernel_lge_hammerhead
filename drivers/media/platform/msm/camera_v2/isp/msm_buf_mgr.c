@@ -280,6 +280,23 @@ static int msm_isp_buf_unprepare(struct msm_isp_buf_mgr *buf_mgr,
 	return 0;
 }
 
+static void msm_isp_dump_bufq(struct msm_isp_bufq *bufq)
+{
+	int i;
+	struct msm_isp_buffer *bi;
+
+	pr_err("%s: bufq %d type %d num_bufs %d clients %d\n",
+		__func__, bufq->bufq_handle, bufq->buf_type, bufq->num_bufs,
+		bufq->buf_client_count);
+	for (i = 0; i < bufq->num_bufs; i++) {
+		bi = &bufq->bufs[i];
+		pr_err("%s:   buf %d: state %d get %d put %d used %d/%d reuse %d\n",
+			__func__, i, bi->state, bi->buf_get_count,
+			bi->buf_put_count, bi->buf_used[0], bi->buf_used[1],
+			bi->buf_reuse_flag);
+	}
+}
+
 static int msm_isp_get_buf(struct msm_isp_buf_mgr *buf_mgr, uint32_t id,
 	uint32_t bufq_handle, struct msm_isp_buffer **buf_info)
 {
@@ -359,6 +376,7 @@ static int msm_isp_get_buf(struct msm_isp_buf_mgr *buf_mgr, uint32_t id,
 	}
 
 	if (!(*buf_info)) {
+		msm_isp_dump_bufq(bufq);
 		if (bufq->buf_type == ISP_SHARE_BUF) {
 			temp_buf_info = kzalloc(
 			   sizeof(struct msm_isp_buffer), GFP_ATOMIC);

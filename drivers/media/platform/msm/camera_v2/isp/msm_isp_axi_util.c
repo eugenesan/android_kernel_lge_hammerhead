@@ -787,6 +787,57 @@ static void msm_isp_process_frame_drop(struct vfe_device *vfe_dev,
 	msm_isp_send_event(vfe_dev, ISP_EVENT_FRAME_DROP, &buf_event);
 }
 
+/*
+ * The buffer the ISP has just written is read by the CPP a few
+ * milliseconds later, so it cannot go back into the pool straight
+ * away: keep it until the next frame of the same stream is done, and
+ * release it then.
+ *
+ * Without this the buffer is not released at all.  This stack does
+ * not use the ISP's shared-buffer accounting -- the CPP has a buffer
+ * manager of its own, and nothing ever puts the ISP's buffer back --
+ * so every frame leaks one buffer.  The pool drains after a few
+ * frames, the ISP stops getting buffers, the frames stop and the
+ * stream stalls.
+ */
+static int msm_isp_held_buf[MAX_NUM_STREAM];
+
+static void msm_isp_release_held_buf(struct vfe_device *vfe_dev,
+	int stream_idx, struct msm_vfe_axi_stream *stream_info)
+{
+	int held = msm_isp_held_buf[stream_idx];
+
+	if (held < 0)
+		return;
+	msm_isp_held_buf[stream_idx] = -1;
+	vfe_dev->buf_mgr->ops->put_buf(vfe_dev->buf_mgr,
+		stream_info->bufq_handle, held);
+}
+
+/*
+ * Hold the buffer the ISP has just written and release the one held
+ * before it.
+ *
+ * The buffer must not go back into the pool straight away: the CPP
+ * reads it a few milliseconds later.  It must not stay there for
+ * good either: nothing else in this stack ever gives the ISP's
+ * buffer back, so every frame would leak one and the pool would
+ * drain after a few frames -- the ISP would stop getting buffers,
+ * the frames would stop and the stream would stall.
+ */
+static void msm_isp_hold_buf(struct vfe_device *vfe_dev, int stream_idx,
+	struct msm_vfe_axi_stream *stream_info, int buf_idx)
+{
+	int held = msm_isp_held_buf[stream_idx];
+
+	if (held >= 0 && held != buf_idx) {
+		msm_isp_held_buf[stream_idx] = -1;
+		vfe_dev->buf_mgr->ops->put_buf(vfe_dev->buf_mgr,
+			stream_info->bufq_handle, held);
+	}
+	msm_isp_held_buf[stream_idx] = buf_idx;
+}
+
 static void msm_isp_process_done_buf(struct vfe_device *vfe_dev,
 	struct msm_vfe_axi_stream *stream_info, struct msm_isp_buffer *buf,
 	struct msm_isp_timestamp *ts)
@@ -794,8 +845,8 @@ static void msm_isp_process_done_buf(struct vfe_device *vfe_dev,
 	int rc;
 	struct msm_isp_event_data buf_event;
 	uint32_t stream_idx = HANDLE_TO_IDX(stream_info->stream_handle);
-	uint32_t buf_src;
 	uint32_t frame_id;
+	int buf_src;
 
 	if (stream_idx >= MAX_NUM_STREAM) {
 		pr_err("%s: Invalid stream_idx", __func__);
@@ -808,6 +859,14 @@ static void msm_isp_process_done_buf(struct vfe_device *vfe_dev,
 	if (buf && ts) {
 		rc = vfe_dev->buf_mgr->ops->get_buf_src(vfe_dev->buf_mgr,
 						buf->bufq_handle, &buf_src);
+		if ((frame_id % 50) == 0) {
+			static int done_n;
+
+			if ((++done_n % 20) == 0)
+				pr_info("%s: frame %u buf %d divert %d src %d\n",
+					__func__, frame_id, buf->buf_idx,
+					stream_info->buf_divert, buf_src);
+		}
 		if (stream_info->buf_divert && rc == 0 &&
 				buf_src != MSM_ISP_BUFFER_SRC_SCRATCH) {
 			rc = vfe_dev->buf_mgr->ops->buf_divert(vfe_dev->buf_mgr,
@@ -831,10 +890,33 @@ static void msm_isp_process_done_buf(struct vfe_device *vfe_dev,
 					ISP_EVENT_BUF_DIVERT + stream_idx,
 					&buf_event);
 			}
+			/*
+			 * The frame is on its way to the CPP, which
+			 * reads the buffer we have just written.
+			 * Hold it until the next frame of this stream
+			 * is done -- by then the CPP has read it -- and
+			 * give it back then.
+			 */
+			msm_isp_hold_buf(vfe_dev, stream_idx,
+				stream_info, buf->buf_idx);
 		} else {
-			vfe_dev->buf_mgr->ops->buf_done(vfe_dev->buf_mgr,
+			rc = vfe_dev->buf_mgr->ops->buf_done(vfe_dev->buf_mgr,
 				buf->bufq_handle, buf->buf_idx,
 				&ts->buf_time, frame_id);
+			if (rc != 0) {
+				/*
+				 * The frame was not handed over: the
+				 * shared-buffer accounting wants a
+				 * second put, and in this stack
+				 * nothing ever gives one (the CPP has
+				 * a buffer manager of its own and
+				 * never touches the ISP's buffers).
+				 * Without this the buffer is lost and
+				 * the pool drains after a few frames.
+				 */
+				msm_isp_hold_buf(vfe_dev, stream_idx,
+					stream_info, buf->buf_idx);
+			}
 		}
 	}
 }
@@ -1091,6 +1173,9 @@ static int msm_isp_start_axi_stream(struct vfe_device *vfe_dev,
  		}
 		stream_info = &axi_data->stream_info[
 			HANDLE_TO_IDX(stream_cfg_cmd->stream_handle[i])];
+		/* No buffer is held over from a previous run. */
+		msm_isp_held_buf[HANDLE_TO_IDX(
+			stream_cfg_cmd->stream_handle[i])] = -1;
 		src_state = axi_data->src_info[
 			SRC_TO_INTF(stream_info->stream_src)].active;
 
@@ -1153,6 +1238,10 @@ static int msm_isp_stop_axi_stream(struct vfe_device *vfe_dev,
 		stream_info = &axi_data->stream_info[
 		     HANDLE_TO_IDX(stream_cfg_cmd->stream_handle[i])];
 
+		/* Give the buffer held over from the last frame back. */
+		msm_isp_release_held_buf(vfe_dev,
+			HANDLE_TO_IDX(stream_cfg_cmd->stream_handle[i]),
+			stream_info);
 
 		stream_info->state = STOP_PENDING;
 		if (stream_info->stream_type == BURST_STREAM &&

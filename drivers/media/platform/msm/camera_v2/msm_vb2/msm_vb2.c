@@ -180,6 +180,66 @@ static struct vb2_queue *msm_vb2_get_queue(int session_id,
 	return msm_get_stream_vb2q(session_id, stream_id);
 }
 
+/*
+ * A diagnostic: the buffer pool is handed out here and given back
+ * in msm_vb2_put_buf() and msm_vb2_buf_done().  A buffer that is
+ * handed out and never given back is leaked, and when the pool runs
+ * dry the stream stops.  Count every hand-out and hand-back per
+ * buffer index so the leak is visible in the log.
+ */
+#define MSM_VB2_TRACE_MAX 16
+static int msm_vb2_trace_get[MSM_VB2_TRACE_MAX];
+static int msm_vb2_trace_put[MSM_VB2_TRACE_MAX];
+static int msm_vb2_trace_done[MSM_VB2_TRACE_MAX];
+
+static void msm_vb2_trace(int idx, int which)
+{
+	if (idx < 0 || idx >= MSM_VB2_TRACE_MAX)
+		return;
+	if (which == 0)
+		msm_vb2_trace_get[idx]++;
+	else if (which == 1)
+		msm_vb2_trace_put[idx]++;
+	else
+		msm_vb2_trace_done[idx]++;
+}
+
+static void msm_vb2_dump_pool(struct msm_stream *stream,
+	int session_id, int stream_id)
+{
+	struct msm_vb2_buffer *msm_vb2;
+	int i;
+	static unsigned long last_dump;
+
+	/* The pool runs dry often; do not drown the log. */
+	{
+		unsigned long now = jiffies;
+
+		if (now - last_dump < HZ)
+			return;
+		last_dump = now;
+	}
+
+	pr_err("%s: no free buffer (session %d stream %d)\n",
+		__func__, session_id, stream_id);
+	list_for_each_entry(msm_vb2, &(stream->queued_list), list) {
+		pr_err("%s:   buf %d: state %d in_freeq %d get %d put %d done %d\n",
+			__func__,
+			msm_vb2->vb2_buf.v4l2_buf.index,
+			msm_vb2->vb2_buf.state,
+			msm_vb2->in_freeq,
+			msm_vb2_trace_get[msm_vb2->vb2_buf.v4l2_buf.index],
+			msm_vb2_trace_put[msm_vb2->vb2_buf.v4l2_buf.index],
+			msm_vb2_trace_done[msm_vb2->vb2_buf.v4l2_buf.index]);
+	}
+	for (i = 0; i < MSM_VB2_TRACE_MAX; i++)
+		if (msm_vb2_trace_get[i] || msm_vb2_trace_put[i] ||
+		    msm_vb2_trace_done[i])
+			pr_err("%s:   idx %d: get %d put %d done %d\n",
+				__func__, i, msm_vb2_trace_get[i],
+				msm_vb2_trace_put[i], msm_vb2_trace_done[i]);
+}
+
 static struct vb2_buffer *msm_vb2_get_buf(int session_id,
 	unsigned int stream_id)
 {
@@ -208,8 +268,10 @@ static struct vb2_buffer *msm_vb2_get_buf(int session_id,
 			continue;
 
 		msm_vb2->in_freeq = 1;
+		msm_vb2_trace(vb2_buf->v4l2_buf.index, 0);
 		goto end;
 	}
+	msm_vb2_dump_pool(stream, session_id, stream_id);
 	msm_vb2 = NULL;
 	vb2_buf = NULL;
 end:
@@ -234,6 +296,7 @@ static int msm_vb2_put_buf(struct vb2_buffer *vb, int session_id,
 			container_of(vb, struct msm_vb2_buffer, vb2_buf);
 		if (msm_vb2->in_freeq) {
 			msm_vb2->in_freeq = 0;
+			msm_vb2_trace(msm_vb2->vb2_buf.v4l2_buf.index, 1);
 			rc = 0;
 		} else
 			rc = -EINVAL;
@@ -264,6 +327,7 @@ static int msm_vb2_buf_done(struct vb2_buffer *vb, int session_id,
 		if (msm_vb2->in_freeq) {
 			vb2_buffer_done(vb, VB2_BUF_STATE_DONE);
 			msm_vb2->in_freeq = 0;
+			msm_vb2_trace(msm_vb2->vb2_buf.v4l2_buf.index, 2);
 			rc = 0;
 		} else
 			rc = -EINVAL;
