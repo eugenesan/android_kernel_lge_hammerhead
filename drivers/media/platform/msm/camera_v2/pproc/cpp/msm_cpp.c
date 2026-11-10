@@ -1420,6 +1420,35 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 			new_frame->num_strips);
 		return -EINVAL;
 	}
+	/*
+	 * Read the frame the ISP has just written, not the buffer
+	 * userspace asked for.  Userspace cannot know which one it is:
+	 * the ISP and the CPP take their buffers from the same pool, so
+	 * the order userspace sees is not the order the ISP used.  A
+	 * wrong guess reads a buffer that holds nothing -- the blank
+	 * frame that blinks in the preview -- and takes seconds to come
+	 * back into step.
+	 */
+	{
+		extern int msm_isp_last_divert_idx;
+		extern uint32_t msm_isp_last_divert_session;
+		extern uint32_t msm_isp_last_divert_stream;
+
+		if (msm_isp_last_divert_idx >= 0 &&
+		    msm_isp_last_divert_session ==
+			((new_frame->identity >> 16) & 0xFFFF) &&
+		    msm_isp_last_divert_stream ==
+			(new_frame->identity & 0xFFFF)) {
+			if (new_frame->input_buffer_info.index !=
+			    (uint32_t)msm_isp_last_divert_idx)
+				pr_debug("%s: input %u -> the ISP's %d\n",
+					 __func__,
+					 new_frame->input_buffer_info.index,
+					 msm_isp_last_divert_idx);
+			new_frame->input_buffer_info.index =
+				(uint32_t)msm_isp_last_divert_idx;
+		}
+	}
 	in_phyaddr = msm_cpp_fetch_buffer_info(cpp_dev,
 		&new_frame->input_buffer_info,
 		((new_frame->identity >> 16) & 0xFFFF),

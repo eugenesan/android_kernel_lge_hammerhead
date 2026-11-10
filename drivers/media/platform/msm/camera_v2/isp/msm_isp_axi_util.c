@@ -14,6 +14,18 @@
 #include "msm_isp_util.h"
 #include "msm_isp_axi_util.h"
 
+/*
+ * The buffer the ISP has just written and handed to the CPP, so that
+ * the CPP driver can be pointed at the frame that exists instead of at
+ * the one userspace guessed.  Read in msm_cpp.c.
+ */
+int msm_isp_last_divert_idx = -1;
+uint32_t msm_isp_last_divert_session;
+uint32_t msm_isp_last_divert_stream;
+EXPORT_SYMBOL(msm_isp_last_divert_idx);
+EXPORT_SYMBOL(msm_isp_last_divert_session);
+EXPORT_SYMBOL(msm_isp_last_divert_stream);
+
 #define SRC_TO_INTF(src) \
 	((src < RDI_INTF_0) ? VFE_PIX_0 : \
 	(VFE_RAW_0 + src - RDI_INTF_0))
@@ -869,6 +881,22 @@ static void msm_isp_process_done_buf(struct vfe_device *vfe_dev,
 		}
 		if (stream_info->buf_divert && rc == 0 &&
 				buf_src != MSM_ISP_BUFFER_SRC_SCRATCH) {
+			/*
+			 * Remember which buffer this frame was written
+			 * into.  The CPP is told by userspace which
+			 * buffer to read, and userspace cannot know:
+			 * the ISP and the CPP take their buffers from
+			 * the same pool, so the order userspace sees is
+			 * not the order the ISP used.  When the guess
+			 * lands on a buffer that holds nothing the CPP
+			 * copies emptiness -- the blank frame that
+			 * blinks in the preview -- and the ring drifts
+			 * for seconds before it comes back into step.
+			 * The CPP driver reads this instead.
+			 */
+			msm_isp_last_divert_session = stream_info->session_id;
+			msm_isp_last_divert_stream = stream_info->stream_id;
+			msm_isp_last_divert_idx = buf->buf_idx;
 			rc = vfe_dev->buf_mgr->ops->buf_divert(vfe_dev->buf_mgr,
 				buf->bufq_handle, buf->buf_idx,
 				&ts->buf_time, frame_id);
