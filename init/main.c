@@ -352,12 +352,13 @@ static void __noreturn wipe_main(void)
 
 	pr_emerg("WIPE: complete, powering off\n");
 
-	/* Power off */
-	if (pm_power_off)
-		pm_power_off();
-
-	while (1)
-		cpu_relax();
+	/* Power off: write 0 to PSHOLD (MSM8974) */
+	{
+		volatile unsigned int *pshold = (volatile unsigned int *)(0xFD510820);
+		*pshold = 0;
+		/* busy-wait for power-off */
+		for (;;) cpu_relax();
+	}
 }
 
 extern char _stext[], _end[];
