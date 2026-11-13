@@ -15,6 +15,7 @@
 #include <asm/mach-types.h>
 #include <asm/system_misc.h>
 #include <asm/highmem.h>
+#include <asm/uaccess.h>
 
 extern const unsigned char relocate_new_kernel[];
 extern const unsigned int relocate_new_kernel_size;
@@ -31,8 +32,34 @@ static atomic_t waiting_for_crash_ipi;
  * This prevents breakage of crash_notes attribute in kernel/ksysfs.c.
  */
 
+/* Destination physical address of the separate DTB segment, found at
+ * load time from the userspace buffer.  At machine_kexec time the segment
+ * has not been copied to its destination yet (relocate_new_kernel does
+ * that), so reading the destination there only sees stale memory. */
+static unsigned long kexec_dtb_phys;
+
 int machine_kexec_prepare(struct kimage *image)
 {
+	int i;
+
+	kexec_dtb_phys = 0;
+	pr_info("kexec_prepare: nr_segments=%d\n", image->nr_segments);
+
+	for (i = 0; i < image->nr_segments; i++) {
+		unsigned char magic[4];
+		void __user *ubuf = image->segment[i].buf;
+
+		if (image->segment[i].bufsz < sizeof(magic))
+			continue;
+		if (copy_from_user(magic, ubuf, sizeof(magic)))
+			continue;
+		if (magic[0] == 0xd0 && magic[1] == 0x0d &&
+		    magic[2] == 0xfe && magic[3] == 0xed) {
+			kexec_dtb_phys = image->segment[i].mem;
+			pr_info("kexec_prepare seg %d: DTB at %08lx\n",
+				i, kexec_dtb_phys);
+		}
+	}
 	return 0;
 }
 
@@ -113,30 +140,8 @@ void (*kexec_reinit)(void);
  */
 static unsigned long kexec_dtb_address(struct kimage *image)
 {
-	int i;
-	unsigned long low = __pa(high_memory);
-
-	for (i = 0; i < image->nr_segments; i++) {
-		unsigned long mem = image->segment[i].mem;
-		unsigned long size = image->segment[i].memsz;
-		u32 magic;
-
-		if (size < 8)
-			continue;
-		if (mem + 4 <= low) {
-			magic = *(u32 *)__va(mem);
-		} else {
-			unsigned long pfn = PFN_DOWN(mem);
-			unsigned long off = mem & (PAGE_SIZE - 1);
-			void *v = kmap_atomic_pfn(pfn);
-
-			magic = *(u32 *)((char *)v + off);
-			kunmap_atomic(v);
-		}
-		if (magic == 0xd00dfeed)
-			return mem;
-	}
-	return 0;
+	(void)image;
+	return kexec_dtb_phys;
 }
 
 void machine_kexec(struct kimage *image)
