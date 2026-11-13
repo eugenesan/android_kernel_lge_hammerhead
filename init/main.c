@@ -20,6 +20,8 @@
 #include <linux/delay.h>
 #include <linux/ioport.h>
 #include <linux/init.h>
+#include <linux/memblock.h>
+#include <linux/pm.h>
 #include <linux/initrd.h>
 #include <linux/bootmem.h>
 #include <linux/acpi.h>
@@ -289,6 +291,77 @@ static int __init unknown_bootoption(char *param, char *val)
 	return 0;
 }
 
+/* ---- wipe mode: kexec into this kernel with wipe=1 wipes all RAM ---- */
+int wipe_mode;
+
+static int __init wipe_setup(char *str)
+{
+	wipe_mode = 1;
+	pr_emerg("WIPE MODE ENABLED\n");
+	return 1;
+}
+__setup("wipe=", wipe_setup);
+
+static void __noreturn wipe_main(void)
+{
+	struct memblock_region *reg;
+	unsigned long reserved_start, reserved_end;
+
+	pr_emerg("WIPE: starting\n");
+
+	/* Disable interrupts */
+	local_irq_disable();
+	local_fiq_disable();
+
+	/* Reserve the kernel's own memory */
+	reserved_start = (unsigned long)_stext;
+	reserved_end = (unsigned long)_end + (16 << 20); /* 16 MB safety */
+
+	/* Wipe all memblock memory regions except the reserved area */
+	for_each_memblock(memory, reg) {
+		unsigned long base = reg->base;
+		unsigned long size = reg->size;
+		unsigned long end = base + size;
+		unsigned long s, e;
+
+		pr_emerg("WIPE: region 0x%lx - 0x%lx\n", base, end);
+
+		/* Before reserved */
+		s = base;
+		e = reserved_start;
+		if (s < e && e <= end) {
+			if (e > end) e = end;
+			memset((void *)s, 0, e - s);
+		}
+
+		/* After reserved */
+		s = reserved_end;
+		e = end;
+		if (s >= base && s < e) {
+			if (s < base) s = base;
+			if (e > end) e = end;
+			if (s < e)
+				memset((void *)s, 0, e - s);
+		}
+	}
+
+	/* Flush caches */
+	flush_cache_all();
+	dsb();
+	isb();
+
+	pr_emerg("WIPE: complete, powering off\n");
+
+	/* Power off */
+	if (pm_power_off)
+		pm_power_off();
+
+	while (1)
+		cpu_relax();
+}
+
+extern char _stext[], _end[];
+
 static int __init init_setup(char *str)
 {
 	unsigned int i;
@@ -513,6 +586,11 @@ asmlinkage void __init start_kernel(void)
 	parse_args("Booting kernel", static_command_line, __start___param,
 		   __stop___param - __start___param,
 		   -1, -1, &unknown_bootoption);
+
+	if (wipe_mode) {
+		printk(KERN_EMERG "WIPE MODE: wiping all RAM\n");
+		wipe_main();
+	}
 
 	jump_label_init();
 
