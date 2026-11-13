@@ -354,7 +354,7 @@ static void __noreturn wipe_main(void)
 
 	/* Power off: write 0 to PSHOLD (MSM8974) */
 	{
-		volatile unsigned int *pshold = (volatile unsigned int *)(0xFD510820);
+		volatile unsigned int *pshold = (volatile unsigned int *)(0xFA017820);
 		*pshold = 0;
 		/* busy-wait for power-off */
 		for (;;) cpu_relax();
