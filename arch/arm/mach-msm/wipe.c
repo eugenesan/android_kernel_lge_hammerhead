@@ -31,6 +31,7 @@
 #include <asm/cacheflush.h>
 #include <asm/barrier.h>
 #include <asm/highmem.h>
+#include <asm/memory.h>
 
 #include <mach/msm_iomap.h>
 #include <mach/scm.h>
@@ -41,6 +42,76 @@
 #define WIPE_MODE_ALL		1
 #define WIPE_MODE_TEST		2
 #define WIPE_MODE_INFO		3
+
+#ifdef CONFIG_MEMORY_WIPE_ON_POWEROFF
+/*
+ * A poweroff writes this marker into the spare tail of the persistent RAM
+ * the bootloader preserves across a warm reset (the ram console uses the
+ * first 256 KB; the whole 1 MB is reserved).  The next boot reads it at
+ * mem_init(), wipes, and powers off before userspace exists.
+ *
+ * The marker is RAM only: if the recovery boot does not happen, it is gone
+ * with the RAM (and so are the secrets).  Nothing is written to NAND.
+ */
+#define KRUX_MARKER_PHYS	0x100F0000UL
+#define KRUX_MARKER_MAGIC	0x4b525857	/* "KRXW" */
+
+struct krux_wipe_marker {
+	u32 magic;
+	u32 magic_inv;
+	u32 seq;
+	u32 crc;
+};
+
+int wipe_from_marker;
+
+static struct krux_wipe_marker *krux_marker(void)
+{
+	return (struct krux_wipe_marker *)__va(KRUX_MARKER_PHYS);
+}
+
+static u32 krux_crc32(const void *buf, size_t len)
+{
+	const u8 *p = buf;
+	u32 crc = 0xffffffff;
+	int i;
+
+	while (len--) {
+		crc ^= *p++;
+		for (i = 0; i < 8; i++)
+			crc = (crc >> 1) ^ (0xedb88320 & -(crc & 1));
+	}
+	return ~crc;
+}
+
+static bool krux_marker_valid(void)
+{
+	struct krux_wipe_marker *m = krux_marker();
+
+	return m->magic == KRUX_MARKER_MAGIC &&
+	       m->magic_inv == ~KRUX_MARKER_MAGIC &&
+	       m->crc == krux_crc32(m, offsetof(struct krux_wipe_marker, crc));
+}
+
+static void krux_marker_write(u32 magic)
+{
+	struct krux_wipe_marker *m = krux_marker();
+
+	m->magic = magic;
+	m->magic_inv = ~magic;
+	m->seq++;
+	m->crc = krux_crc32(m, offsetof(struct krux_wipe_marker, crc));
+	/* The reset does not flush the cache; push it to DRAM ourselves. */
+	flush_cache_all();
+}
+
+void krux_wipe_reboot(void)
+{
+	pr_crit("wipe: marking RAM and restarting into recovery\n");
+	krux_marker_write(KRUX_MARKER_MAGIC);
+	kernel_restart("recovery");
+}
+#endif
 
 static int wipe_mode;
 static int wipe_verify;
@@ -292,6 +363,13 @@ static void __init wipe_force_power_off(void)
 
 void __init wipe_main(void)
 {
+#ifdef CONFIG_MEMORY_WIPE_ON_POWEROFF
+	if (!wipe_mode && krux_marker_valid()) {
+		wipe_from_marker = 1;
+		wipe_mode = WIPE_MODE_ALL;
+		pr_crit("wipe: poweroff marker found, wiping this boot\n");
+	}
+#endif
 	if (!wipe_mode)
 		return;
 
@@ -391,6 +469,10 @@ void wipe_poweroff(void)
 	if (!wipe_poweroff_pending)
 		return;
 
+#ifdef CONFIG_MEMORY_WIPE_ON_POWEROFF
+	if (wipe_from_marker)
+		krux_marker_write(0);
+#endif
 	pr_crit("wipe: powering off\n");
 	kernel_power_off();
 

@@ -2479,16 +2479,32 @@ config MSM_DLOAD_MODE
 
 config MEMORY_WIPE
 	bool "Wipe RAM when booting with wipe= (MSM8974)"
-	depends on ARCH_MSM8974 && KEXEC
+	depends on ARCH_MSM8974
 	default n
 	help
-	  When the kernel is kexec'd with wipe= on the command line, zero
+	  When the kernel is booted with wipe= on the command line, zero
 	  every page of RAM that this kernel has not reserved, flush the
 	  caches and power off.  Used as the final action of a shutdown or
 	  reboot so the previous kernel's memory is not left in DRAM.
 
 	  wipe=test[:MB] wipes a bounded amount and continues booting, for
 	  testing.  wipe=verify additionally samples the wiped pages.
+
+config MEMORY_WIPE_ON_POWEROFF
+	bool "Wipe RAM on poweroff via a recovery reboot (MSM8974)"
+	depends on MEMORY_WIPE
+	default n
+	help
+	  Intercept LINUX_REBOOT_CMD_POWER_OFF.  Instead of powering off,
+	  write a marker into the persistent RAM and restart with the
+	  bootloader's "recovery" restart reason (IMEM, the same one
+	  reboot bootloader uses).  The next boot, at mem_init(), sees the
+	  marker, runs the wipe and powers off before userspace exists.
+
+	  This is kernel and RAM only: no NAND write, no userspace, no
+	  second kernel and no kexec.  If the recovery boot does not
+	  happen, the marker is gone with the RAM and the wipe is not
+	  retried.
 
 config MSM_JTAG
 	bool "Debug and ETM trace support across power collapse"

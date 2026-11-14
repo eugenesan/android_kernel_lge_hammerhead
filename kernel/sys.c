@@ -46,6 +46,10 @@
 
 #include <linux/compat.h>
 #include <linux/syscalls.h>
+#ifdef CONFIG_MEMORY_WIPE_ON_POWEROFF
+extern int wipe_from_marker;
+extern void krux_wipe_reboot(void);
+#endif
 #include <linux/kprobes.h>
 #include <linux/user_namespace.h>
 
@@ -478,6 +482,18 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	ret = reboot_pid_ns(task_active_pid_ns(current), cmd);
 	if (ret)
 		return ret;
+
+#ifdef CONFIG_MEMORY_WIPE_ON_POWEROFF
+	/*
+	 * A poweroff becomes a recovery reboot so the next boot can wipe
+	 * RAM at mem_init(), before userspace.  The wipe boot itself powers
+	 * off directly (kernel_power_off in kernel_init), not through here.
+	 */
+	if (cmd == LINUX_REBOOT_CMD_POWER_OFF && !wipe_from_marker) {
+		krux_wipe_reboot();
+		return 0;
+	}
+#endif
 
 	/* Instead of trying to make the power_off code look like
 	 * halt when pm_power_off is not set do it the easy way.
