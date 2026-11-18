@@ -254,6 +254,9 @@ int msm_isp_cfg_pix(struct vfe_device *vfe_dev,
 	struct msm_vfe_input_cfg *input_cfg)
 {
 	int rc = 0;
+	pr_info("[REI] cfg_pix: active=%d used=%d\n",
+		vfe_dev->axi_data.src_info[VFE_PIX_0].active,
+		vfe_dev->axi_data.num_used_wm);
 	if (vfe_dev->axi_data.src_info[VFE_PIX_0].active) {
 		pr_err("%s: pixel path is active\n", __func__);
 		return -EINVAL;

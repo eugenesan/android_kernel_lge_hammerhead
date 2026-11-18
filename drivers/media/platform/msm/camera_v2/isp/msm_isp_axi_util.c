@@ -87,6 +87,11 @@ int msm_isp_validate_axi_request(struct msm_vfe_axi_shared_data *axi_data,
 		&axi_data->stream_info[
 			HANDLE_TO_IDX(stream_cfg_cmd->axi_stream_handle)];
 
+	pr_info("[REI] validate: fmt=0x%x used_wm=%d planes=%d free=%x%x\n",
+		stream_cfg_cmd->output_format, axi_data->num_used_wm,
+		stream_info->num_planes, axi_data->free_wm[0],
+		axi_data->free_wm[1]);
+
 	switch (stream_cfg_cmd->output_format) {
 	case V4L2_PIX_FMT_SBGGR8:
 	case V4L2_PIX_FMT_SGBRG8:
@@ -131,6 +136,10 @@ int msm_isp_validate_axi_request(struct msm_vfe_axi_shared_data *axi_data,
 	if (axi_data->hw_info->num_wm - axi_data->num_used_wm <
 		stream_info->num_planes) {
 		pr_err("%s: No free write masters\n", __func__);
+		pr_info("[REI] NO_WM: used=%d planes=%d free0=%x free1=%x h=%x\n",
+			axi_data->num_used_wm, stream_info->num_planes,
+			axi_data->free_wm[0], axi_data->free_wm[1],
+			stream_cfg_cmd->axi_stream_handle);
 		return rc;
 	}
 
@@ -251,10 +260,16 @@ void msm_isp_axi_free_wm(struct msm_vfe_axi_shared_data *axi_data,
 	struct msm_vfe_axi_stream *stream_info)
 {
 	int i;
+	pr_info("[REI] free_wm ENTER: planes=%d used=%d wm0=%d wm1=%d\n",
+		stream_info->num_planes, axi_data->num_used_wm,
+		stream_info->wm[0], stream_info->wm[1]);
 	for (i = 0; i < stream_info->num_planes; i++) {
 		axi_data->free_wm[stream_info->wm[i]] = 0;
 		axi_data->num_used_wm--;
 	}
+	pr_info("[REI] free_wm EXIT: used=%d free0=%x free1=%x\n",
+		axi_data->num_used_wm, axi_data->free_wm[0],
+		axi_data->free_wm[1]);
 }
 
 void msm_isp_axi_reserve_comp_mask(
@@ -591,6 +606,8 @@ int msm_isp_request_axi_stream(struct vfe_device *vfe_dev, void *arg)
 int msm_isp_release_axi_stream(struct vfe_device *vfe_dev, void *arg)
 {
 	int rc = 0, i;
+	pr_info("[REI] RELEASE_STREAM called h=%x\n",
+		((struct msm_vfe_axi_stream_release_cmd *)arg)->stream_handle);
 	struct msm_vfe_axi_stream_release_cmd *stream_release_cmd = arg;
 	struct msm_vfe_axi_shared_data *axi_data = &vfe_dev->axi_data;
 	struct msm_vfe_axi_stream *stream_info;
@@ -604,6 +621,11 @@ int msm_isp_release_axi_stream(struct vfe_device *vfe_dev, void *arg)
 	}
 	stream_info = &axi_data->stream_info[
 		HANDLE_TO_IDX(stream_release_cmd->stream_handle)];
+	pr_info("[REI] RELEASE_STREAM idx=%d state=%d planes=%d wm=%d,%d used=%d\n",
+		HANDLE_TO_IDX(stream_release_cmd->stream_handle),
+		stream_info->state, stream_info->num_planes,
+		stream_info->wm[0], stream_info->wm[1],
+		axi_data->num_used_wm);
 	if (stream_info->state == AVALIABLE) {
 		pr_err("%s: Stream already released\n", __func__);
 		return -EINVAL;
@@ -613,6 +635,8 @@ int msm_isp_release_axi_stream(struct vfe_device *vfe_dev, void *arg)
 		stream_cfg.stream_handle[0] = stream_release_cmd->stream_handle;
 		msm_isp_cfg_axi_stream(vfe_dev, (void *) &stream_cfg);
 	}
+	pr_info("[REI] RELEASE_STREAM pre-free state=%d used=%d\n",
+		stream_info->state, axi_data->num_used_wm);
 
 	for (i = 0; i < stream_info->num_planes; i++) {
 		vfe_dev->hw_info->vfe_ops.axi_ops.
@@ -1342,6 +1366,11 @@ int msm_isp_cfg_axi_stream(struct vfe_device *vfe_dev, void *arg)
 {
 	int rc = 0;
 	struct msm_vfe_axi_stream_cfg_cmd *stream_cfg_cmd = arg;
+	pr_info("[REI] CFG_STREAM cmd=%d h=%x state=%d used=%d\n",
+		stream_cfg_cmd->cmd, stream_cfg_cmd->stream_handle[0],
+		vfe_dev->axi_data.stream_info[
+			HANDLE_TO_IDX(stream_cfg_cmd->stream_handle[0])].state,
+		vfe_dev->axi_data.num_used_wm);
 	struct msm_vfe_axi_shared_data *axi_data = &vfe_dev->axi_data;
 	enum msm_isp_camif_update_state camif_update;
 
