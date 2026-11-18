@@ -1086,10 +1086,14 @@ int msm_isp_close_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	mutex_lock(&vfe_dev->realtime_mutex);
 	mutex_lock(&vfe_dev->core_mutex);
 	if (vfe_dev->vfe_open_cnt == 0) {
-		pr_err("%s: Invalid close\n", __func__);
+		/* A full camera quiesce releases the stream before the
+		 * process exits; the VFE node is then closed again by V4L2.
+		 * An already-closed VFE is a successful no-op, not a
+		 * failure, and must not be reported as an error. */
+		ISP_DBG("%s: already closed\n", __func__);
 		mutex_unlock(&vfe_dev->core_mutex);
 		mutex_unlock(&vfe_dev->realtime_mutex);
-		return -ENODEV;
+		return 0;
 	}
 
 	rc = vfe_dev->hw_info->vfe_ops.axi_ops.halt(vfe_dev);

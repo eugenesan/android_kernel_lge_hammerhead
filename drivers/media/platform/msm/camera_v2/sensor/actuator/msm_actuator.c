@@ -826,7 +826,7 @@ static int msm_actuator_close(struct v4l2_subdev *sd,
 		rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_util(
 			&a_ctrl->i2c_client, MSM_CCI_RELEASE);
 		if (rc < 0)
-			pr_err_ratelimited("cci_init failed\n");
+			CDBG("cci already released on close\n");
 	}
 	kfree(a_ctrl->i2c_reg_tbl);
 	a_ctrl->i2c_reg_tbl = NULL;

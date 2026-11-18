@@ -756,9 +756,12 @@ static int32_t msm_cci_release(struct v4l2_subdev *sd)
 	cci_dev = v4l2_get_subdevdata(sd);
 
 	if (!cci_dev->ref_count || cci_dev->cci_state != CCI_STATE_ENABLED) {
-		pr_err_ratelimited("%s invalid ref count %d / cci state %d\n",
+		/* Sensor/actuator subdevs can be closed after CCI was already
+		 * released by the camera quiesce path.  Treat a repeated
+		 * release as a no-op instead of reporting it as an error. */
+		CDBG("%s already released (ref %d state %d)\n",
 			__func__, cci_dev->ref_count, cci_dev->cci_state);
-		return -EINVAL;
+		return 0;
 	}
 
 	if (--cci_dev->ref_count) {
